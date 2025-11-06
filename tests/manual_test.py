@@ -133,11 +133,9 @@ async def interactive_mode(repos_dir: str):
     print(f"Repository directory: {repos_dir}")
     print()
 
-    env = {"MCP_BUILD_REPOS_DIR": repos_dir}
-
     async with MCPClient(
-        ["python", "-m", "mcp_build.server"],
-        env=env
+        ["python", "-m", "server"],
+        cwd=repos_dir
     ) as client:
         # Run all tool tests
         await test_all_tools(client)
@@ -234,15 +232,13 @@ async def main():
 
     if args.tool:
         # Test specific tool
-        env = {"MCP_BUILD_REPOS_DIR": args.repos_dir}
-
         args_dict = {"args": args.args} if args.args else {}
         if args.repo:
             args_dict["repo"] = args.repo
 
         async with MCPClient(
-            ["python", "-m", "mcp_build.server"],
-            env=env
+            ["python", "-m", "server"],
+            cwd=args.repos_dir
         ) as client:
             await test_specific_tool(client, args.tool, args_dict)
     else:

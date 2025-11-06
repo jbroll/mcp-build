@@ -32,8 +32,8 @@ async def main():
 
     # Test with MCP client
     async with MCPClient(
-        ["python", "-m", "mcp_build.server"],
-        env={"MCP_BUILD_REPOS_DIR": str(test_dir.parent)}
+        ["python", "-m", "server"],
+        cwd=str(test_dir.parent)
     ) as client:
         print("Testing invalid git command (push)...")
         try:
