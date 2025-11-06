@@ -28,13 +28,14 @@ Run make command with specified arguments in a repository.
 
 **Parameters:**
 - `args` (optional): Arguments to pass to make (e.g., "clean", "all", "test")
-- `repo` (optional): Repository name (uses default if not specified)
+- `repo` (required): Repository name
 
 **Examples:**
 ```json
 {
   "tool": "make",
-  "args": "clean all"
+  "args": "clean all",
+  "repo": "my-project"
 }
 ```
 
@@ -53,20 +54,22 @@ Run git commands (limited to safe operations).
 
 **Parameters:**
 - `args` (required): Git command and arguments
-- `repo` (optional): Repository name (uses default if not specified)
+- `repo` (required): Repository name
 
 **Examples:**
 ```json
 {
   "tool": "git",
-  "args": "status"
+  "args": "status",
+  "repo": "my-project"
 }
 ```
 
 ```json
 {
   "tool": "git",
-  "args": "checkout feature-branch"
+  "args": "checkout feature-branch",
+  "repo": "my-project"
 }
 ```
 
@@ -83,13 +86,14 @@ List files and directories in a repository.
 
 **Parameters:**
 - `args` (optional): Arguments to pass to ls (e.g., "-la", "-lh build/")
-- `repo` (optional): Repository name (uses default if not specified)
+- `repo` (required): Repository name
 
 **Examples:**
 ```json
 {
   "tool": "ls",
-  "args": "-la"
+  "args": "-la",
+  "repo": "my-project"
 }
 ```
 
@@ -105,12 +109,13 @@ List files and directories in a repository.
 Show environment information including installed tools and versions.
 
 **Parameters:**
-- `repo` (optional): Repository name (uses default if not specified)
+- `repo` (required): Repository name
 
 **Example:**
 ```json
 {
-  "tool": "env"
+  "tool": "env",
+  "repo": "my-project"
 }
 ```
 
@@ -299,11 +304,13 @@ curl -H "Authorization: Bearer YOUR_KEY" \
       "name": "test-repo",
       "path": "/path/to/test-repo",
       "description": "Repository at test-repo",
-      "is_default": true
+      "is_default": false
     }
   ]
 }
 ```
+
+**Note:** The `is_default` field is deprecated and always `false` since repository parameter is now required for all operations.
 
 #### `GET /api/repos/{repo}/env`
 Get environment information for a repository.
@@ -569,19 +576,19 @@ mypy src/
 await mcp.call_tool("list", {})
 
 # Check current git status
-await mcp.call_tool("git", {"args": "status"})
+await mcp.call_tool("git", {"args": "status", "repo": "my-project"})
 
 # Pull latest changes
-await mcp.call_tool("git", {"args": "pull origin main"})
+await mcp.call_tool("git", {"args": "pull origin main", "repo": "my-project"})
 
 # Clean and build
-await mcp.call_tool("make", {"args": "clean all"})
+await mcp.call_tool("make", {"args": "clean all", "repo": "my-project"})
 
 # Run tests
-await mcp.call_tool("make", {"args": "test"})
+await mcp.call_tool("make", {"args": "test", "repo": "my-project"})
 
 # Check build artifacts
-await mcp.call_tool("ls", {"args": "-lh build/"})
+await mcp.call_tool("ls", {"args": "-lh build/", "repo": "my-project"})
 ```
 
 ### Working with Multiple Repositories

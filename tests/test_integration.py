@@ -151,13 +151,12 @@ async def test_list_repositories(mcp_client):
     text = content["text"]
     assert "test-repo-1" in text
     assert "test-repo-2" in text
-    assert "(default)" in text  # One should be marked as default
 
 
 @pytest.mark.asyncio
 async def test_git_status(mcp_client):
     """Test git status command"""
-    result = await mcp_client.call_tool("git", {"args": "status"})
+    result = await mcp_client.call_tool("git", {"args": "status", "repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
@@ -171,7 +170,7 @@ async def test_git_status(mcp_client):
 @pytest.mark.asyncio
 async def test_git_log(mcp_client):
     """Test git log command"""
-    result = await mcp_client.call_tool("git", {"args": "log --oneline -5"})
+    result = await mcp_client.call_tool("git", {"args": "log --oneline -5", "repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
@@ -185,7 +184,7 @@ async def test_git_log(mcp_client):
 @pytest.mark.asyncio
 async def test_git_branch(mcp_client):
     """Test git branch command"""
-    result = await mcp_client.call_tool("git", {"args": "branch"})
+    result = await mcp_client.call_tool("git", {"args": "branch", "repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
@@ -199,7 +198,7 @@ async def test_git_branch(mcp_client):
 @pytest.mark.asyncio
 async def test_git_invalid_command(mcp_client):
     """Test that invalid git commands are rejected"""
-    result = await mcp_client.call_tool("git", {"args": "push origin main"})
+    result = await mcp_client.call_tool("git", {"args": "push origin main", "repo": "test-repo-1"})
     assert len(result) == 1
     text = result[0]["text"]
     assert "Error:" in text and "not allowed" in text
@@ -250,7 +249,7 @@ async def test_make_clean(mcp_client):
 @pytest.mark.asyncio
 async def test_make_no_args(mcp_client):
     """Test make without arguments (runs default target)"""
-    result = await mcp_client.call_tool("make", {})
+    result = await mcp_client.call_tool("make", {"repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
@@ -274,7 +273,7 @@ async def test_ls_basic(mcp_client):
 @pytest.mark.asyncio
 async def test_ls_with_flags(mcp_client):
     """Test ls with flags"""
-    result = await mcp_client.call_tool("ls", {"args": "-la"})
+    result = await mcp_client.call_tool("ls", {"args": "-la", "repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
@@ -288,7 +287,7 @@ async def test_ls_with_flags(mcp_client):
 @pytest.mark.asyncio
 async def test_ls_specific_path(mcp_client):
     """Test ls with specific path"""
-    result = await mcp_client.call_tool("ls", {"args": "-l .git"})
+    result = await mcp_client.call_tool("ls", {"args": "-l .git", "repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
@@ -302,7 +301,7 @@ async def test_ls_specific_path(mcp_client):
 @pytest.mark.asyncio
 async def test_env_command(mcp_client):
     """Test env command"""
-    result = await mcp_client.call_tool("env")
+    result = await mcp_client.call_tool("env", {"repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
@@ -370,7 +369,7 @@ async def test_invalid_repo_name(mcp_client):
 @pytest.mark.asyncio
 async def test_dangerous_path_traversal(mcp_client):
     """Test that path traversal attempts are blocked"""
-    result = await mcp_client.call_tool("ls", {"args": "../../../etc/passwd"})
+    result = await mcp_client.call_tool("ls", {"args": "../../../etc/passwd", "repo": "test-repo-1"})
     assert len(result) == 1
     text = result[0]["text"]
     assert "Error:" in text and ("dangerous patterns" in text or "traversal" in text)
@@ -379,7 +378,7 @@ async def test_dangerous_path_traversal(mcp_client):
 @pytest.mark.asyncio
 async def test_dangerous_command_injection(mcp_client):
     """Test that command injection attempts are blocked"""
-    result = await mcp_client.call_tool("make", {"args": "all; rm -rf /"})
+    result = await mcp_client.call_tool("make", {"args": "all; rm -rf /", "repo": "test-repo-1"})
     assert len(result) == 1
     text = result[0]["text"]
     assert "Error:" in text and "dangerous patterns" in text
@@ -390,8 +389,8 @@ async def test_concurrent_tool_calls(mcp_client):
     """Test that multiple tool calls work sequentially"""
     # Run multiple commands sequentially (MCP stdio doesn't support true concurrency)
     result1 = await mcp_client.call_tool("list")
-    result2 = await mcp_client.call_tool("git", {"args": "status"})
-    result3 = await mcp_client.call_tool("ls", {"args": "-l"})
+    result2 = await mcp_client.call_tool("git", {"args": "status", "repo": "test-repo-1"})
+    result3 = await mcp_client.call_tool("ls", {"args": "-l", "repo": "test-repo-1"})
 
     # All should complete successfully
     assert len(result1) == 1 and result1[0]["type"] == "text"
@@ -402,7 +401,7 @@ async def test_concurrent_tool_calls(mcp_client):
 @pytest.mark.asyncio
 async def test_error_handling_empty_git_args(mcp_client):
     """Test error handling for empty git arguments"""
-    result = await mcp_client.call_tool("git", {"args": ""})
+    result = await mcp_client.call_tool("git", {"args": "", "repo": "test-repo-1"})
     assert len(result) == 1
     text = result[0]["text"]
     assert "Error:" in text
@@ -412,7 +411,7 @@ async def test_error_handling_empty_git_args(mcp_client):
 async def test_long_running_command(mcp_client):
     """Test handling of commands that produce output"""
     # Git log can produce significant output
-    result = await mcp_client.call_tool("git", {"args": "log --all --oneline"})
+    result = await mcp_client.call_tool("git", {"args": "log --all --oneline", "repo": "test-repo-1"})
 
     assert len(result) == 1
     content = result[0]
