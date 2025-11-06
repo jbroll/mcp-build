@@ -158,7 +158,7 @@ Add the server to your MCP client configuration (e.g., Claude Desktop):
   "mcpServers": {
     "mcp-build": {
       "command": "python",
-      "args": ["-m", "mcp_build_environment.server"],
+      "args": ["-m", "server"],
       "env": {
         "MCP_BUILD_REPOS_DIR": "/home/user/projects"
       }
@@ -180,7 +180,7 @@ The service will automatically discover all git repositories (directories contai
   "mcpServers": {
     "mcp-build": {
       "command": "python",
-      "args": ["-m", "mcp_build_environment.server"],
+      "args": ["-m", "server"],
       "env": {
         "MCP_BUILD_REPOS_DIR": "/home/user/my-project/.."
       }
@@ -195,7 +195,7 @@ The service will automatically discover all git repositories (directories contai
   "mcpServers": {
     "mcp-build": {
       "command": "python",
-      "args": ["-m", "mcp_build_environment.server"],
+      "args": ["-m", "server"],
       "env": {
         "MCP_BUILD_REPOS_DIR": "/home/user/workspace"
       }
@@ -222,11 +222,11 @@ This service implements basic security measures to prevent accidents:
 ```
 mcp-build/
 ├── src/
-│   └── mcp_build_environment/
-│       ├── __init__.py
-│       ├── server.py          # Main MCP server
-│       ├── validators.py      # Argument validation
-│       └── env_info.sh        # Environment info script
+│   ├── __init__.py
+│   ├── server.py              # Main MCP server
+│   ├── validators.py          # Argument validation
+│   ├── env_info.sh            # Environment info script
+│   └── helpers/               # Helper modules
 ├── tests/
 │   ├── __init__.py
 │   └── test_validators.py    # Validator tests

@@ -25,13 +25,17 @@ dev = [
 ]
 
 [project.scripts]
-mcp-build = "mcp_build_environment.server:main"
+mcp-build = "server:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+py-modules = ["server", "validators", "helpers"]
+package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-mcp_build_environment = ["*.sh"]
+"*" = ["*.sh"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
 
 [tool.black]
 line-length = 100

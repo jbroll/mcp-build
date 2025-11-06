@@ -16,7 +16,7 @@ from pathlib import Path
 import tempfile
 import subprocess
 
-from mcp_build_environment.helpers.mcp_client import MCPClient
+from helpers.mcp_client import MCPClient
 
 
 # Test environment
@@ -89,7 +89,7 @@ def test_repos_dir():
 async def mcp_client(test_repos_dir):
     """Create and initialize an MCP client"""
     client = MCPClient(
-        ["python", "-m", "mcp_build_environment.server"],
+        ["python", "-m", "mcp_build.server"],
         env={"MCP_BUILD_REPOS_DIR": str(test_repos_dir)}
     )
     await client.start()
@@ -102,7 +102,7 @@ async def mcp_client(test_repos_dir):
 async def test_server_initialization(test_repos_dir):
     """Test that the server initializes correctly"""
     client = MCPClient(
-        ["python", "-m", "mcp_build_environment.server"],
+        ["python", "-m", "mcp_build.server"],
         env={"MCP_BUILD_REPOS_DIR": str(test_repos_dir)}
     )
 

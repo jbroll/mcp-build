@@ -9,7 +9,7 @@ import subprocess
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mcp_build_environment.helpers.mcp_client import MCPClient
+from helpers.mcp_client import MCPClient
 
 async def main():
     """Test git invalid command"""
@@ -32,7 +32,7 @@ async def main():
 
     # Test with MCP client
     async with MCPClient(
-        ["python", "-m", "mcp_build_environment.server"],
+        ["python", "-m", "mcp_build.server"],
         env={"MCP_BUILD_REPOS_DIR": str(test_dir.parent)}
     ) as client:
         print("Testing invalid git command (push)...")

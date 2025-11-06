@@ -22,7 +22,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from .validators import validate_git_args, validate_make_args, validate_ls_args, validate_path
+from validators import validate_git_args, validate_make_args, validate_ls_args, validate_path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

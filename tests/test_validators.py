@@ -3,7 +3,7 @@ Tests for argument validators
 """
 
 import pytest
-from mcp_build_environment.validators import (
+from validators import (
     validate_git_args,
     validate_make_args,
     validate_ls_args,
