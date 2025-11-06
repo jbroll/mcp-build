@@ -167,25 +167,19 @@ class BuildEnvironmentServer:
                             "path": str(item),
                             "description": f"Repository at {item.relative_to(REPOS_BASE_DIR)}"
                         }
-                        # Set first repo as default if none is set
-                        if self.current_repo is None:
-                            self.current_repo = repo_name
 
             logger.info(f"Discovered {len(self.repos)} repositories in {REPOS_BASE_DIR}")
-            if self.current_repo:
-                logger.info(f"Default repository: {self.current_repo}")
         except Exception as e:
             logger.error(f"Error discovering repositories: {e}", exc_info=True)
             self.repos = {}
 
-    def get_repo_path(self, repo_name: str | None = None) -> Path:
-        """Get the path to a repository"""
-        repo = repo_name or self.current_repo
-        if not repo:
-            raise ValueError("No repository specified and no default set")
-        if repo not in self.repos:
-            raise ValueError(f"Unknown repository: {repo}")
-        return Path(self.repos[repo]["path"])
+    def get_repo_path(self, repo_name: str) -> Path:
+        """Get the path to a repository. Repository name is required."""
+        if not repo_name:
+            raise ValueError("Repository name is required")
+        if repo_name not in self.repos:
+            raise ValueError(f"Unknown repository: {repo_name}")
+        return Path(self.repos[repo_name]["path"])
 
     async def get_tools_list(self) -> List[Tool]:
         """List available MCP tools"""
@@ -212,10 +206,10 @@ class BuildEnvironmentServer:
                         },
                         "repo": {
                             "type": "string",
-                            "description": "Repository name (optional, uses default if not specified)"
+                            "description": "Repository name (required)"
                         }
                     },
-                    "required": []
+                    "required": ["repo"]
                 }
             ),
             Tool(
@@ -231,10 +225,10 @@ class BuildEnvironmentServer:
                         },
                         "repo": {
                             "type": "string",
-                            "description": "Repository name (optional, uses default if not specified)"
+                            "description": "Repository name (required)"
                         }
                     },
-                    "required": ["args"]
+                    "required": ["args", "repo"]
                 }
             ),
             Tool(
@@ -250,10 +244,10 @@ class BuildEnvironmentServer:
                         },
                         "repo": {
                             "type": "string",
-                            "description": "Repository name (optional, uses default if not specified)"
+                            "description": "Repository name (required)"
                         }
                     },
-                    "required": []
+                    "required": ["repo"]
                 }
             ),
             Tool(
@@ -265,10 +259,10 @@ class BuildEnvironmentServer:
                     "properties": {
                         "repo": {
                             "type": "string",
-                            "description": "Repository name (optional, uses default if not specified)"
+                            "description": "Repository name (required)"
                         }
                     },
-                    "required": []
+                    "required": ["repo"]
                 }
             )
         ]
@@ -299,8 +293,7 @@ class BuildEnvironmentServer:
 
         output = "Available repositories:\n\n"
         for name, info in self.repos.items():
-            marker = " (default)" if name == self.current_repo else ""
-            output += f"- {name}{marker}\n"
+            output += f"- {name}\n"
             output += f"  Path: {info.get('path', 'N/A')}\n"
             output += f"  Description: {info.get('description', 'N/A')}\n\n"
 
@@ -528,7 +521,7 @@ class BuildEnvironmentServer:
                     name=name,
                     path=info["path"],
                     description=info.get("description", ""),
-                    is_default=(name == self.current_repo)
+                    is_default=False  # No default repository
                 )
                 for name, info in self.repos.items()
             ]
