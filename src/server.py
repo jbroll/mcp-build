@@ -897,12 +897,11 @@ class BuildEnvironmentServer:
             logger.info("  Header: Authorization: Bearer <session-key>")
             logger.info("  Or query param: ?key=<session-key>")
             logger.info("")
-            logger.warning("=" * 80)
-            logger.warning("Copy-paste this message to AI agents:")
-            logger.warning("")
-            logger.warning(f"Use the MCP build service described at http://{display_host}:{HTTP_PORT}/mcp-build.md")
-            logger.warning(f"Session key: {SESSION_KEY}")
-            logger.warning("=" * 80)
+            logger.info("=" * 80)
+            logger.info("Copy-paste this message to AI agents:")
+            logger.info("")
+            print(f"\n\nUse the MCP build service http://{display_host}:{HTTP_PORT}/mcp-build.md\nSession key: {SESSION_KEY}\n\n")
+            logger.info("=" * 80)
         else:
             logger.warning("Authentication: DISABLED (no session key configured)")
 
