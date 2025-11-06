@@ -7,6 +7,7 @@ Provides build environment access via MCP protocol with commands:
 - make: Run make with specified arguments
 - git: Run git commands (limited to safe operations)
 - ls: List files/directories in repository
+- read_file: Read file contents with optional line range
 - env: Show environment information and tool versions
 """
 
@@ -38,7 +39,7 @@ from starlette.responses import JSONResponse, StreamingResponse, PlainTextRespon
 from starlette.requests import Request
 import uvicorn
 
-from validators import validate_git_args, validate_make_args, validate_ls_args, validate_path
+from validators import validate_git_args, validate_make_args, validate_ls_args, validate_path, validate_file_path
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -267,6 +268,33 @@ class BuildEnvironmentServer:
                     },
                     "required": ["repo"]
                 }
+            ),
+            Tool(
+                name="read_file",
+                description="Read the contents of a file in a repository. "
+                           "Supports reading specific line ranges for large files.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name (required)"
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "Absolute path to the file to read (required)"
+                        },
+                        "start_line": {
+                            "type": "integer",
+                            "description": "Starting line number (1-indexed, optional). If provided, only lines from start_line to end_line will be returned."
+                        },
+                        "end_line": {
+                            "type": "integer",
+                            "description": "Ending line number (1-indexed, optional). If provided, only lines from start_line to end_line will be returned."
+                        }
+                    },
+                    "required": ["repo", "path"]
+                }
             )
         ]
 
@@ -283,6 +311,8 @@ class BuildEnvironmentServer:
                 return await self.handle_ls(arguments)
             elif name == "env":
                 return await self.handle_env(arguments)
+            elif name == "read_file":
+                return await self.handle_read_file(arguments)
             else:
                 raise ValueError(f"Unknown tool: {name}")
         except Exception as e:
@@ -374,6 +404,79 @@ class BuildEnvironmentServer:
 
         result = await self.run_command([str(ENV_INFO_SCRIPT)], cwd=repo_path)
         return [TextContent(type="text", text=result)]
+
+    async def handle_read_file(self, args: Dict[str, Any]) -> List[TextContent]:
+        """Handle read_file command"""
+        repo = args.get("repo")
+        file_path = args.get("path")
+        start_line = args.get("start_line")
+        end_line = args.get("end_line")
+
+        if not file_path:
+            raise ValueError("File path is required")
+
+        # Get repository path
+        repo_path = self.get_repo_path(repo)
+
+        # Validate and resolve the file path
+        validated_path = validate_file_path(file_path, repo_path)
+
+        # Read the file
+        try:
+            with open(validated_path, 'r', encoding='utf-8', errors='replace') as f:
+                if start_line is not None or end_line is not None:
+                    # Read specific line range
+                    lines = f.readlines()
+                    total_lines = len(lines)
+
+                    # Validate line numbers
+                    if start_line is not None and start_line < 1:
+                        raise ValueError(f"start_line must be >= 1, got {start_line}")
+                    if end_line is not None and end_line < 1:
+                        raise ValueError(f"end_line must be >= 1, got {end_line}")
+                    if start_line is not None and end_line is not None and start_line > end_line:
+                        raise ValueError(f"start_line ({start_line}) must be <= end_line ({end_line})")
+
+                    # Default values
+                    start_idx = (start_line - 1) if start_line is not None else 0
+                    end_idx = end_line if end_line is not None else total_lines
+
+                    # Clamp to valid range
+                    start_idx = max(0, min(start_idx, total_lines))
+                    end_idx = max(0, min(end_idx, total_lines))
+
+                    # Extract the requested lines
+                    selected_lines = lines[start_idx:end_idx]
+
+                    # Format output with line numbers
+                    output = f"File: {validated_path}\n"
+                    output += f"Lines {start_idx + 1}-{end_idx} of {total_lines}\n"
+                    output += "=" * 80 + "\n"
+                    for i, line in enumerate(selected_lines, start=start_idx + 1):
+                        output += f"{i:6d}: {line.rstrip()}\n"
+
+                    return [TextContent(type="text", text=output)]
+                else:
+                    # Read entire file
+                    content = f.read()
+                    lines_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
+
+                    output = f"File: {validated_path}\n"
+                    output += f"Total lines: {lines_count}\n"
+                    output += "=" * 80 + "\n"
+
+                    # Add line numbers to entire file
+                    for i, line in enumerate(content.splitlines(), start=1):
+                        output += f"{i:6d}: {line}\n"
+
+                    return [TextContent(type="text", text=output)]
+
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {validated_path}")
+        except PermissionError:
+            raise PermissionError(f"Permission denied reading file: {validated_path}")
+        except Exception as e:
+            raise Exception(f"Error reading file {validated_path}: {str(e)}")
 
     async def run_command(self, cmd: List[str], cwd: Path) -> str:
         """Run a command in a repository directory"""
