@@ -31,7 +31,7 @@ import os
 # Add parent directory to path to import mcp_client
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mcp_build_environment.helpers.mcp_client import MCPClient
+from mcp_build.helpers.mcp_client import MCPClient
 
 
 async def test_all_tools(client: MCPClient):
@@ -136,7 +136,7 @@ async def interactive_mode(repos_dir: str):
     env = {"MCP_BUILD_REPOS_DIR": repos_dir}
 
     async with MCPClient(
-        ["python", "-m", "mcp_build_environment.server"],
+        ["python", "-m", "mcp_build.server"],
         env=env
     ) as client:
         # Run all tool tests
@@ -241,7 +241,7 @@ async def main():
             args_dict["repo"] = args.repo
 
         async with MCPClient(
-            ["python", "-m", "mcp_build_environment.server"],
+            ["python", "-m", "mcp_build.server"],
             env=env
         ) as client:
             await test_specific_tool(client, args.tool, args_dict)

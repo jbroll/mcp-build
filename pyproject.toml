@@ -25,13 +25,13 @@ dev = [
 ]
 
 [project.scripts]
-mcp-build = "mcp_build_environment.server:main"
+mcp-build = "mcp_build.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-mcp_build_environment = ["*.sh"]
+mcp_build = ["*.sh"]
 
 [tool.black]
 line-length = 100

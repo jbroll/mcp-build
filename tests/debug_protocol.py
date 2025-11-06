@@ -20,7 +20,7 @@ async def main():
     env["MCP_BUILD_REPOS_DIR"] = os.getcwd()
 
     proc = await asyncio.create_subprocess_exec(
-        "python", "-m", "mcp_build_environment.server",
+        "python", "-m", "mcp_build.server",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,

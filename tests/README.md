@@ -102,14 +102,14 @@ Comprehensive integration test suite with 24 tests covering:
 
 ### `mcp_client.py`
 
-Reusable MCP client implementation for testing (located in `src/mcp_build_environment/helpers/`):
+Reusable MCP client implementation for testing (located in `src/mcp_build/helpers/`):
 
 ```python
-from mcp_build_environment.helpers.mcp_client import MCPClient
+from mcp_build.helpers.mcp_client import MCPClient
 
 # Context manager usage
 async with MCPClient(
-    ["python", "-m", "mcp_build_environment.server"],
+    ["python", "-m", "mcp_build.server"],
     env={"MCP_BUILD_REPOS_DIR": "/path/to/repos"}
 ) as client:
     # List available tools
@@ -253,10 +253,10 @@ The MCP server logs are captured during tests. Check stderr output in test failu
 
 ```bash
 # Start server with current directory as repos dir
-MCP_BUILD_REPOS_DIR=. python -m mcp_build_environment.server
+MCP_BUILD_REPOS_DIR=. python -m mcp_build.server
 
 # Or with specific directory
-MCP_BUILD_REPOS_DIR=/path/to/repos python -m mcp_build_environment.server
+MCP_BUILD_REPOS_DIR=/path/to/repos python -m mcp_build.server
 
 # Then use the manual test client to connect
 python tests/manual_test.py --repos-dir /path/to/repos
@@ -347,13 +347,13 @@ test:
 pytest tests/test_integration.py -v --tb=short
 
 # Run with coverage
-pytest tests/test_integration.py --cov=mcp_build_environment --cov-report=html
+pytest tests/test_integration.py --cov=mcp_build --cov-report=html
 
 # Run with junit XML output for CI tools
 pytest tests/test_integration.py --junitxml=test-results.xml
 
 # Run with all options
-pytest tests/test_integration.py -v --tb=short --cov=mcp_build_environment --cov-report=xml --junitxml=test-results.xml
+pytest tests/test_integration.py -v --tb=short --cov=mcp_build --cov-report=xml --junitxml=test-results.xml
 ```
 
 **Note on Manual Tests:**
