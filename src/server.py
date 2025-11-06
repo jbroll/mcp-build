@@ -20,6 +20,7 @@ import signal
 import socket
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -812,6 +813,29 @@ class BuildEnvironmentServer:
         await server.serve()
 
 
+def detect_public_ip(timeout=5):
+    """Detect public IP address using external service"""
+    services = [
+        "https://api.ipify.org",
+        "https://checkip.amazonaws.com",
+        "https://icanhazip.com"
+    ]
+
+    for service in services:
+        try:
+            logger.info(f"Detecting public IP from {service}...")
+            with urllib.request.urlopen(service, timeout=timeout) as response:
+                ip = response.read().decode('utf-8').strip()
+                logger.info(f"Detected public IP: {ip}")
+                return ip
+        except Exception as e:
+            logger.debug(f"Failed to get IP from {service}: {e}")
+            continue
+
+    logger.warning("Could not detect public IP address")
+    return None
+
+
 def setup_signal_handlers():
     """Set up signal handlers for immediate shutdown"""
     def signal_handler(signum, frame):
@@ -852,6 +876,12 @@ Examples:
 
   # Start with HTTP transport and specify external hostname for display
   %(prog)s --transport http --external-host example.com
+
+  # Start with HTTP and auto-detect public IP (useful behind NAT/router)
+  %(prog)s --transport http --detect-public-ip
+
+  # Combine: use public IP detection with custom session key
+  %(prog)s --transport http --detect-public-ip --session-key my-key
         """
     )
 
@@ -877,7 +907,13 @@ Examples:
 
     parser.add_argument(
         "--external-host",
-        help="External hostname for documentation URLs (default: auto-detected from system hostname)"
+        help="External hostname/IP for documentation URLs (default: auto-detected from system hostname)"
+    )
+
+    parser.add_argument(
+        "--detect-public-ip",
+        action="store_true",
+        help="Auto-detect public IP address using external service (useful when behind NAT/router)"
     )
 
     parser.add_argument(
@@ -909,8 +945,17 @@ async def main():
     # Set external hostname for display purposes
     if args.external_host:
         EXTERNAL_HOST = args.external_host
+    elif args.detect_public_ip:
+        # Detect public IP address
+        EXTERNAL_HOST = detect_public_ip()
+        if not EXTERNAL_HOST:
+            # Fallback to local hostname if detection fails
+            try:
+                EXTERNAL_HOST = socket.gethostname()
+            except Exception:
+                EXTERNAL_HOST = "localhost"
     else:
-        # Auto-detect hostname
+        # Auto-detect local hostname
         try:
             EXTERNAL_HOST = socket.gethostname()
         except Exception:
