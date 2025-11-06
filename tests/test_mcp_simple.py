@@ -156,6 +156,94 @@ class MCPBuildTester:
             except Exception as e:
                 print(f"Correctly rejected: {e}")
 
+    async def test_invalid_tool_name(self):
+        """Test that invalid tool names are rejected"""
+        print("\n=== Testing invalid tool name (should fail) ===")
+        async with self.connect() as session:
+            try:
+                result = await session.call_tool("nonexistent_tool", {})
+                print("Result:", result)
+                # Should get an error response
+                if result.content:
+                    for content in result.content:
+                        if hasattr(content, 'text'):
+                            text = content.text
+                            print(content.text)
+                            assert "Error" in text or "Unknown tool" in text, \
+                                "Expected error for invalid tool name"
+            except Exception as e:
+                print(f"Correctly rejected invalid tool: {e}")
+
+    async def test_missing_required_arguments(self):
+        """Test that missing required arguments are rejected"""
+        print("\n=== Testing missing required arguments (should fail) ===")
+        async with self.connect() as session:
+            try:
+                # git command requires 'args' parameter
+                result = await session.call_tool("git", {})
+                print("Result:", result)
+                # Should get an error response
+                if result.content:
+                    for content in result.content:
+                        if hasattr(content, 'text'):
+                            text = content.text
+                            print(content.text)
+                            assert "Error" in text or "requires arguments" in text, \
+                                "Expected error for missing arguments"
+            except Exception as e:
+                print(f"Correctly rejected missing arguments: {e}")
+
+    async def test_shell_metacharacters(self):
+        """Test that shell metacharacters are blocked"""
+        print("\n=== Testing shell metacharacters (should fail) ===")
+        dangerous_patterns = [
+            ("git", {"args": "status | cat /etc/passwd"}),  # Pipe
+            ("git", {"args": "status > /tmp/output"}),      # Redirect
+            ("git", {"args": "status && rm -rf /"}),        # Command chaining
+            ("git", {"args": "status; whoami"}),            # Command separator
+            ("ls", {"args": "$(whoami)"}),                  # Command substitution
+            ("ls", {"args": "`id`"}),                       # Backtick substitution
+        ]
+
+        async with self.connect() as session:
+            for tool_name, args in dangerous_patterns:
+                try:
+                    result = await session.call_tool(tool_name, args)
+                    # Check if error is in the response
+                    if result.content:
+                        for content in result.content:
+                            if hasattr(content, 'text'):
+                                text = content.text
+                                print(f"Testing {tool_name} with {args['args']}: {text[:100]}...")
+                                assert "Error" in text or "Invalid" in text or "dangerous" in text, \
+                                    f"Expected error for dangerous pattern: {args['args']}"
+                except Exception as e:
+                    print(f"Correctly rejected {tool_name} {args['args']}: {e}")
+
+    async def test_dangerous_make_arguments(self):
+        """Test that dangerous make arguments are blocked"""
+        print("\n=== Testing dangerous make arguments (should fail) ===")
+        dangerous_make_commands = [
+            "clean; rm -rf /",
+            "all && cat /etc/passwd",
+            "test | tee /tmp/output",
+        ]
+
+        async with self.connect() as session:
+            for make_args in dangerous_make_commands:
+                try:
+                    result = await session.call_tool("make", {"args": make_args})
+                    # Check if error is in the response
+                    if result.content:
+                        for content in result.content:
+                            if hasattr(content, 'text'):
+                                text = content.text
+                                print(f"Testing make with '{make_args}': {text[:100]}...")
+                                assert "Error" in text or "Invalid" in text or "dangerous" in text, \
+                                    f"Expected error for dangerous make command: {make_args}"
+                except Exception as e:
+                    print(f"Correctly rejected 'make {make_args}': {e}")
+
     async def run_all_tests(self):
         """Run all tests"""
         print("=" * 60)
@@ -163,6 +251,7 @@ class MCPBuildTester:
         print("=" * 60)
 
         try:
+            # Positive tests - verify functionality
             await self.test_list_tools()
             await self.test_list_repositories()
             await self.test_ls()
@@ -170,8 +259,14 @@ class MCPBuildTester:
             await self.test_git_log()
             await self.test_env()
             await self.test_make_version()
+
+            # Negative tests - verify security validations
             await self.test_invalid_git_command()
             await self.test_path_traversal()
+            await self.test_invalid_tool_name()
+            await self.test_missing_required_arguments()
+            await self.test_shell_metacharacters()
+            await self.test_dangerous_make_arguments()
 
             print("\n" + "=" * 60)
             print("All tests completed successfully!")
