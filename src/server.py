@@ -20,7 +20,14 @@ from typing import Any, Dict, List
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
+from mcp.server.sse import SseServerTransport
 from mcp.types import Tool, TextContent
+
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+import uvicorn
 
 from validators import validate_git_args, validate_make_args, validate_ls_args, validate_path
 
@@ -33,6 +40,11 @@ ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
 
 # Base directory for repositories - defaults to current working directory
 REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", os.getcwd()))
+
+# HTTP Transport Configuration
+TRANSPORT_MODE = os.environ.get("MCP_BUILD_TRANSPORT", "stdio").lower()
+HTTP_HOST = os.environ.get("MCP_BUILD_HOST", "0.0.0.0")
+HTTP_PORT = int(os.environ.get("MCP_BUILD_PORT", "3344"))
 
 
 class BuildEnvironmentServer:
@@ -324,21 +336,73 @@ class BuildEnvironmentServer:
             raise
 
     async def run(self):
-        """Start the MCP server"""
+        """Start the MCP server with stdio transport"""
         await self.discover_repos()
         async with stdio_server() as (read_stream, write_stream):
-            logger.info("MCP Build Server starting...")
+            logger.info("MCP Build Server starting with stdio transport...")
             await self.server.run(
                 read_stream,
                 write_stream,
                 self.server.create_initialization_options()
             )
 
+    async def handle_sse(self, request):
+        """Handle SSE endpoint for HTTP transport"""
+        logger.info("SSE connection established")
+        sse_transport = SseServerTransport("/messages")
+
+        async with sse_transport.connect_sse(
+            request.scope,
+            request.receive,
+            request._send
+        ) as (read_stream, write_stream):
+            init_options = self.server.create_initialization_options()
+            await self.server.run(read_stream, write_stream, init_options)
+
+    def create_http_app(self):
+        """Create Starlette ASGI application for HTTP transport"""
+        routes = [
+            Route("/sse", endpoint=self.handle_sse, methods=["GET"])
+        ]
+
+        middleware = [
+            Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"]
+            )
+        ]
+
+        return Starlette(debug=True, routes=routes, middleware=middleware)
+
+    async def run_http(self):
+        """Start the MCP server with HTTP transport"""
+        await self.discover_repos()
+        app = self.create_http_app()
+
+        logger.info(f"MCP Build Server starting with HTTP transport on {HTTP_HOST}:{HTTP_PORT}")
+        logger.info(f"SSE endpoint: http://{HTTP_HOST}:{HTTP_PORT}/sse")
+
+        config = uvicorn.Config(
+            app,
+            host=HTTP_HOST,
+            port=HTTP_PORT,
+            log_level="info"
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
+
 
 async def main():
     """Main async entry point"""
     server = BuildEnvironmentServer()
-    await server.run()
+
+    if TRANSPORT_MODE == "http":
+        await server.run_http()
+    else:
+        # Default to stdio
+        await server.run()
 
 
 def cli():

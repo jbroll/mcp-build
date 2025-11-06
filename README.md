@@ -169,8 +169,64 @@ Add the server to your MCP client configuration (e.g., Claude Desktop):
 
 **Configuration Options:**
 - `MCP_BUILD_REPOS_DIR`: Directory containing your git repositories (defaults to current working directory)
+- `MCP_BUILD_TRANSPORT`: Transport mode - `stdio` (default) or `http`
+- `MCP_BUILD_HOST`: Host to bind HTTP server to (default: `0.0.0.0`)
+- `MCP_BUILD_PORT`: Port for HTTP server (default: `3344`)
 
 The service will automatically discover all git repositories (directories containing `.git`) in the configured directory.
+
+### HTTP Transport
+
+The service supports HTTP transport using Server-Sent Events (SSE) for remote access. This is useful for:
+- Remote access to build environments
+- Running the service in Docker containers
+- Integration with web-based MCP clients
+
+**Starting with HTTP transport:**
+
+```bash
+# Set environment variables
+export MCP_BUILD_TRANSPORT=http
+export MCP_BUILD_HOST=0.0.0.0
+export MCP_BUILD_PORT=3344
+export MCP_BUILD_REPOS_DIR=/path/to/repos
+
+# Run the server
+mcp-build
+```
+
+The service will start an HTTP server with an SSE endpoint at:
+```
+http://0.0.0.0:3344/sse
+```
+
+**MCP Client Configuration for HTTP:**
+
+```json
+{
+  "mcpServers": {
+    "mcp-build-http": {
+      "url": "http://localhost:3344/sse"
+    }
+  }
+}
+```
+
+**Using with Docker:**
+
+```bash
+# Edit docker-compose.yml to set MCP_BUILD_TRANSPORT=http
+# Then start the container
+cd docker
+docker-compose up -d
+
+# The service will be available at http://localhost:3344/sse
+```
+
+**Security Note:** When using HTTP transport, the service does not use TLS/SSL encryption. For production use:
+- Deploy behind a reverse proxy (nginx, caddy) with TLS
+- Use firewall rules to restrict access
+- Consider VPN or SSH tunneling for remote access
 
 ### Example Configuration for Different Setups
 

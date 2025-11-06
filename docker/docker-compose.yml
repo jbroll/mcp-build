@@ -7,6 +7,9 @@ services:
       dockerfile: Dockerfile
     image: mcp-build-environment:latest
     container_name: mcp-build-env
+    ports:
+      # Expose MCP HTTP server port
+      - "3344:3344"
     volumes:
       # Mount build directory for persistence
       - build-data:/build
@@ -14,6 +17,10 @@ services:
       - ../src:/mcp-server
     environment:
       - BUILD_ENV_BASE=/build
+      # MCP Transport Configuration
+      - MCP_BUILD_TRANSPORT=stdio
+      - MCP_BUILD_HOST=0.0.0.0
+      - MCP_BUILD_PORT=3344
     # Keep container running
     command: tail -f /dev/null
     # Resource limits (adjust as needed)

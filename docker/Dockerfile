@@ -55,5 +55,8 @@ RUN mkdir -p ${BUILD_ENV_BASE}
 # Set working directory
 WORKDIR ${BUILD_ENV_BASE}
 
+# Expose MCP HTTP server port
+EXPOSE 3344
+
 # Default command
 CMD ["/bin/bash"]
