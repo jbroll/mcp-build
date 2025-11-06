@@ -46,6 +46,15 @@ class MCPClient:
         full_env = os.environ.copy()
         full_env |= self.env
 
+        # Ensure PYTHONPATH includes the src directory for module imports
+        # Find the project root (where src directory exists)
+        current_file = Path(__file__).resolve()
+        src_dir = current_file.parent.parent  # Go up to src from helpers
+        if 'PYTHONPATH' in full_env:
+            full_env['PYTHONPATH'] = f"{src_dir}:{full_env['PYTHONPATH']}"
+        else:
+            full_env['PYTHONPATH'] = str(src_dir)
+
         self.process = await asyncio.create_subprocess_exec(
             *self.server_command,
             stdin=asyncio.subprocess.PIPE,
@@ -226,13 +235,9 @@ class MCPClient:
 
 async def test_client_example():
     """Example usage of the MCP client"""
-    # Set environment for testing
-    test_env = {}
-
     # Create and use client
     async with MCPClient(
-        ["python", "-m", "mcp_build_environment.server"],
-        env=test_env
+        ["python", "-m", "server"]
     ) as client:
         # List available tools
         tools = await client.list_tools()

@@ -89,7 +89,7 @@ def test_repos_dir():
 async def mcp_client(test_repos_dir):
     """Create and initialize an MCP client"""
     client = MCPClient(
-        ["python", "-m", "mcp_build.server"],
+        ["python", "-m", "server"],
         cwd=str(test_repos_dir)
     )
     await client.start()
@@ -102,7 +102,7 @@ async def mcp_client(test_repos_dir):
 async def test_server_initialization(test_repos_dir):
     """Test that the server initializes correctly"""
     client = MCPClient(
-        ["python", "-m", "mcp_build.server"],
+        ["python", "-m", "server"],
         cwd=str(test_repos_dir)
     )
 

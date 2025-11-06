@@ -134,7 +134,7 @@ async def interactive_mode(repos_dir: str):
     print()
 
     async with MCPClient(
-        ["python", "-m", "mcp_build.server"],
+        ["python", "-m", "server"],
         cwd=repos_dir
     ) as client:
         # Run all tool tests
@@ -237,7 +237,7 @@ async def main():
             args_dict["repo"] = args.repo
 
         async with MCPClient(
-            ["python", "-m", "mcp_build.server"],
+            ["python", "-m", "server"],
             cwd=args.repos_dir
         ) as client:
             await test_specific_tool(client, args.tool, args_dict)

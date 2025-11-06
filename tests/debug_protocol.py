@@ -17,7 +17,7 @@ async def main():
 
     # Start server in the current directory
     proc = await asyncio.create_subprocess_exec(
-        "python", "-m", "mcp_build.server",
+        "python", "-m", "server",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
