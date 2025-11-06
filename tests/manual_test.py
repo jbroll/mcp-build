@@ -2,6 +2,10 @@
 """
 Manual test script for debugging the MCP Build Service locally
 
+NOTE: This script is intended for manual, interactive testing only.
+It is NOT included in automated CI testing.
+Please run this script locally to manually verify interactive features.
+
 This script starts the MCP server and provides an interactive way to test tools.
 You can also run it in the background and use it for debugging.
 
@@ -27,7 +31,7 @@ import os
 # Add parent directory to path to import mcp_client
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tests.mcp_client import MCPClient
+from mcp_build_environment.helpers.mcp_client import MCPClient
 
 
 async def test_all_tools(client: MCPClient):
@@ -117,7 +121,12 @@ async def test_specific_tool(client: MCPClient, tool_name: str, args_dict: dict)
 
 
 async def interactive_mode(repos_dir: str):
-    """Interactive mode for testing"""
+    """
+    Interactive mode for testing.
+
+    This function is intended for manual, interactive use only.
+    It is NOT included in automated CI testing.
+    """
     print("\n" + "=" * 70)
     print("MCP BUILD SERVICE - INTERACTIVE TEST MODE")
     print("=" * 70)

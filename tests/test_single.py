@@ -9,7 +9,7 @@ import subprocess
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from tests.mcp_client import MCPClient
+from mcp_build_environment.helpers.mcp_client import MCPClient
 
 async def main():
     """Test git invalid command"""
