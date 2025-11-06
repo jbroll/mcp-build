@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-mcp-build = "server:main"
+mcp-build = "server:cli"
 
 [tool.setuptools]
 py-modules = ["server", "validators", "helpers"]

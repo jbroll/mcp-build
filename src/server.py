@@ -336,10 +336,15 @@ class BuildEnvironmentServer:
 
 
 async def main():
-    """Main entry point"""
+    """Main async entry point"""
     server = BuildEnvironmentServer()
     await server.run()
 
 
-if __name__ == "__main__":
+def cli():
+    """Synchronous entry point for setuptools console_scripts"""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    cli()
