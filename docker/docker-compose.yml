@@ -21,6 +21,9 @@ services:
       - MCP_BUILD_TRANSPORT=stdio
       - MCP_BUILD_HOST=0.0.0.0
       - MCP_BUILD_PORT=3344
+      # Set to 'http' and provide a session key to enable HTTP transport
+      # - MCP_BUILD_TRANSPORT=http
+      # - MCP_BUILD_SESSION_KEY=your-secret-session-key-here
     # Keep container running
     command: tail -f /dev/null
     # Resource limits (adjust as needed)

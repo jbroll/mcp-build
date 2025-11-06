@@ -172,6 +172,7 @@ Add the server to your MCP client configuration (e.g., Claude Desktop):
 - `MCP_BUILD_TRANSPORT`: Transport mode - `stdio` (default) or `http`
 - `MCP_BUILD_HOST`: Host to bind HTTP server to (default: `0.0.0.0`)
 - `MCP_BUILD_PORT`: Port for HTTP server (default: `3344`)
+- `MCP_BUILD_SESSION_KEY`: Authentication key for HTTP transport (auto-generated if not provided)
 
 The service will automatically discover all git repositories (directories containing `.git`) in the configured directory.
 
@@ -179,19 +180,28 @@ The service will automatically discover all git repositories (directories contai
 
 The service supports HTTP transport using Server-Sent Events (SSE) for remote access. This is useful for:
 - Remote access to build environments
-- Running the service in Docker containers
+- Running the service in containers or remote servers
 - Integration with web-based MCP clients
+
+**Authentication:**
+
+HTTP transport requires a session key for authentication. You can either:
+1. Set `MCP_BUILD_SESSION_KEY` environment variable with your own key
+2. Let the server auto-generate a secure random key (displayed on startup)
 
 **Starting with HTTP transport:**
 
 ```bash
+# Generate a secure session key
+export MCP_BUILD_SESSION_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+
 # Set environment variables
 export MCP_BUILD_TRANSPORT=http
 export MCP_BUILD_HOST=0.0.0.0
 export MCP_BUILD_PORT=3344
 export MCP_BUILD_REPOS_DIR=/path/to/repos
 
-# Run the server
+# Run the server (it will display the session key if not set)
 mcp-build
 ```
 
@@ -202,31 +212,49 @@ http://0.0.0.0:3344/sse
 
 **MCP Client Configuration for HTTP:**
 
+Include the session key in the URL as a query parameter:
+
 ```json
 {
   "mcpServers": {
     "mcp-build-http": {
-      "url": "http://localhost:3344/sse"
+      "url": "http://localhost:3344/sse?key=YOUR_SESSION_KEY_HERE"
     }
   }
 }
 ```
 
-**Using with Docker:**
+Or use the Authorization header (if your MCP client supports it):
 
-```bash
-# Edit docker-compose.yml to set MCP_BUILD_TRANSPORT=http
-# Then start the container
-cd docker
-docker-compose up -d
-
-# The service will be available at http://localhost:3344/sse
+```json
+{
+  "mcpServers": {
+    "mcp-build-http": {
+      "url": "http://localhost:3344/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_SESSION_KEY_HERE"
+      }
+    }
+  }
+}
 ```
 
-**Security Note:** When using HTTP transport, the service does not use TLS/SSL encryption. For production use:
-- Deploy behind a reverse proxy (nginx, caddy) with TLS
-- Use firewall rules to restrict access
+**Testing the Connection:**
+
+```bash
+# Test with curl (replace YOUR_KEY with your session key)
+curl -H "Authorization: Bearer YOUR_KEY" http://localhost:3344/sse
+
+# Or using query parameter
+curl "http://localhost:3344/sse?key=YOUR_KEY"
+```
+
+**Security Notes:**
+- Session keys provide authentication to prevent unauthorized access
+- Use TLS/SSL in production by deploying behind a reverse proxy (nginx, caddy)
+- Use firewall rules to restrict access to trusted networks
 - Consider VPN or SSH tunneling for remote access
+- Keep your session key secret and rotate it regularly
 
 ### Example Configuration for Different Setups
 
@@ -262,14 +290,27 @@ docker-compose up -d
 
 ## Security
 
-This service implements basic security measures to prevent accidents:
+This service implements security measures to protect your build environment:
 
+### Authentication (HTTP Transport)
+- **Session Key Authentication**: HTTP transport requires a session key (Bearer token or query parameter)
+- **Auto-generated Keys**: Secure random keys are generated if not provided
+- **Constant-time Comparison**: Uses `secrets.compare_digest()` to prevent timing attacks
+
+### Command Validation
 - **Path Traversal Protection**: Blocks `../` patterns and absolute paths
 - **Command Injection Protection**: Blocks pipes, redirects, and command substitution
-- **Git Command Whitelist**: Only allows safe git operations
+- **Git Command Whitelist**: Only allows safe git operations (status, log, checkout, pull, branch, diff, fetch, show)
 - **Argument Validation**: Validates all command arguments before execution
 
-**Important:** These are safety measures to prevent accidents, not comprehensive security controls. Do not expose this service to untrusted users or networks.
+### Best Practices
+- Keep your session key secret and rotate it regularly
+- Use TLS/SSL in production (deploy behind a reverse proxy)
+- Restrict network access with firewall rules
+- Use stdio transport for local, trusted environments
+- Use HTTP transport only when remote access is required
+
+**Important:** These security measures provide protection for typical use cases, but do not expose this service to completely untrusted users or networks without additional security controls.
 
 ## Development
 
@@ -286,9 +327,6 @@ mcp-build/
 ├── tests/
 │   ├── __init__.py
 │   └── test_validators.py    # Validator tests
-├── docker/                    # Optional Docker setup
-│   ├── Dockerfile
-│   └── docker-compose.yml
 ├── requirements.txt
 ├── pyproject.toml
 └── README.md
