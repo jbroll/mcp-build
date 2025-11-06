@@ -437,15 +437,22 @@ class BuildEnvironmentServer:
         await server.serve()
 
 
-def setup_signal_handlers(shutdown_event: asyncio.Event):
-    """Set up signal handlers for graceful shutdown"""
+def setup_signal_handlers():
+    """Set up signal handlers for immediate shutdown"""
     def signal_handler(signum, frame):
-        """Handle shutdown signals"""
+        """Handle shutdown signals in a signal-safe way"""
         sig_name = signal.Signals(signum).name
-        logger.info(f"\nReceived {sig_name}, shutting down immediately...")
-        shutdown_event.set()
-        # Force exit after a brief moment if event loop doesn't respond
-        sys.exit(0)
+        # Use os.write for signal-safe output (logger is not signal-safe)
+        msg = f"\nReceived {sig_name}, shutting down...\n".encode('utf-8')
+        os.write(sys.stderr.fileno(), msg)
+
+        # Stop the event loop gracefully instead of forcing sys.exit(0)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.stop()
+        except RuntimeError:
+            # No event loop running, exit immediately
+            sys.exit(0)
 
     # Register handlers for SIGINT (Ctrl+C) and SIGTERM
     signal.signal(signal.SIGINT, signal_handler)
@@ -534,8 +541,7 @@ async def main():
             logger.warning("=" * 80)
 
     # Set up signal handlers for immediate shutdown
-    shutdown_event = asyncio.Event()
-    setup_signal_handlers(shutdown_event)
+    setup_signal_handlers()
 
     # Create and run server
     server = BuildEnvironmentServer()
@@ -547,7 +553,7 @@ async def main():
             # Default to stdio
             await server.run()
     except KeyboardInterrupt:
-        # This will be caught if the signal handler doesn't exit first
+        # This will be caught if the signal handler doesn't stop the loop first
         logger.info("\nShutdown complete")
     except Exception as e:
         logger.error(f"Server error: {e}", exc_info=True)
