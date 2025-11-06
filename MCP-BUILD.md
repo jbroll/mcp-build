@@ -8,6 +8,7 @@ This document describes how to use a remote MCP build service instance for build
 
 The MCP build service provides remote access to a build environment where you can:
 - List available repositories
+- Read files from repositories
 - Run builds and tests
 - Execute git operations
 - Inspect the build environment
@@ -58,6 +59,23 @@ curl -X POST \
   -d '{"args": "-la"}' \
   "http://HOST:PORT/api/repos/REPO/ls?key=SESSION_KEY"
 ```
+
+#### Read File
+```bash
+# Read entire file
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"repo": "REPO", "path": "/absolute/path/to/file.txt"}' \
+  "http://HOST:PORT/api/repos/REPO/read_file?key=SESSION_KEY"
+
+# Read specific line range (useful for large files)
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"repo": "REPO", "path": "/absolute/path/to/file.txt", "start_line": 100, "end_line": 200}' \
+  "http://HOST:PORT/api/repos/REPO/read_file?key=SESSION_KEY"
+```
+
+**Note**: The path must be absolute and within the repository directory. Line numbers are 1-indexed.
 
 #### Git Status/Branch/Log (Quick)
 ```bash
@@ -209,6 +227,7 @@ curl -X POST -H "Content-Type: application/json" \
 | `/api/repos` | GET | List repositories | Fast |
 | `/api/repos/{repo}/env` | GET | Environment info | Fast |
 | `/api/repos/{repo}/ls` | POST | List files | Fast |
+| `/api/repos/{repo}/read_file` | POST | Read file contents | Fast |
 | `/api/repos/{repo}/git/quick` | POST | Quick git ops | Fast |
 | `/stream/repos/{repo}/make` | POST | Build/test | Streaming |
 | `/stream/repos/{repo}/git` | POST | Git operations | Streaming |

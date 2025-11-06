@@ -167,3 +167,75 @@ def validate_ls_args(args: str) -> None:
 
         # Validate paths
         validate_path(part)
+
+
+def validate_file_path(file_path: str, repo_path: Path) -> Path:
+    """
+    Validate a file path for reading and ensure it's within the repository.
+
+    This validator accepts both absolute and relative paths but ensures that
+    the final resolved path is within the repository directory.
+
+    Args:
+        file_path: The file path to validate (can be absolute or relative)
+        repo_path: The repository root path
+
+    Returns:
+        Path: The validated absolute path to the file
+
+    Raises:
+        ValueError: If path contains dangerous patterns or escapes the repository
+    """
+    if not file_path:
+        raise ValueError("File path cannot be empty")
+
+    # Check for dangerous command injection patterns
+    # We're less strict than validate_path since we're only reading files
+    dangerous_for_file_read = [
+        r";",      # Command chaining
+        r"\|",     # Pipes
+        r"&",      # Background/chaining
+        r"`",      # Command substitution
+        r"\$\(",   # Command substitution
+    ]
+
+    for pattern in dangerous_for_file_read:
+        if re.search(pattern, file_path):
+            raise ValueError(f"File path contains dangerous pattern: {file_path}")
+
+    # Convert to Path object
+    path_obj = Path(file_path)
+
+    # Resolve the path to absolute
+    if path_obj.is_absolute():
+        # Absolute path - resolve it
+        resolved_path = path_obj.resolve()
+    else:
+        # Relative path - resolve relative to repo
+        resolved_path = (repo_path / path_obj).resolve()
+
+    # Ensure the resolved path is within the repository
+    repo_path_resolved = repo_path.resolve()
+    try:
+        # This will raise ValueError if resolved_path is not relative to repo_path
+        resolved_path.relative_to(repo_path_resolved)
+    except ValueError:
+        raise ValueError(
+            f"Access denied: Path '{file_path}' resolves to '{resolved_path}' "
+            f"which is outside repository '{repo_path_resolved}'"
+        )
+
+    # Additional check: ensure no parent directory traversal in original path
+    # This catches things like "foo/../../etc/passwd" even if they resolve safely
+    if ".." in path_obj.parts:
+        # But we need to verify it doesn't escape
+        try:
+            if path_obj.is_absolute():
+                check_path = path_obj.resolve()
+            else:
+                check_path = (repo_path / path_obj).resolve()
+            check_path.relative_to(repo_path_resolved)
+        except ValueError:
+            raise ValueError(f"Path traversal not allowed: {file_path}")
+
+    return resolved_path

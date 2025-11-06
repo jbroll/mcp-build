@@ -128,7 +128,7 @@ async def test_list_tools(mcp_client):
 
     # Check that all expected tools are present
     tool_names = {tool["name"] for tool in tools}
-    expected_tools = {"list", "make", "git", "ls", "env"}
+    expected_tools = {"list", "make", "git", "ls", "env", "read_file"}
 
     assert expected_tools.issubset(tool_names), f"Missing tools: {expected_tools - tool_names}"
 
@@ -418,6 +418,52 @@ async def test_long_running_command(mcp_client):
     assert content["type"] == "text"
     # Should have received all output
     assert len(content["text"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_read_file_basic(mcp_client, test_repos_dir):
+    """Test reading a file"""
+    result = await mcp_client.call_tool("read_file", {
+        "repo": "test-repo-1",
+        "path": "test.txt"
+    })
+
+    assert len(result) == 1
+    content = result[0]
+    assert content["type"] == "text"
+    text = content["text"]
+    assert "Hello from test repo 1" in text
+
+
+@pytest.mark.asyncio
+async def test_read_file_with_line_range(mcp_client, test_repos_dir):
+    """Test reading a file with line range"""
+    # Read the Makefile with a line range
+    result = await mcp_client.call_tool("read_file", {
+        "repo": "test-repo-1",
+        "path": "Makefile",
+        "start_line": 1,
+        "end_line": 5
+    })
+
+    assert len(result) == 1
+    content = result[0]
+    assert content["type"] == "text"
+    text = content["text"]
+    # Should show line range info
+    assert "Lines 1-5" in text
+
+
+@pytest.mark.asyncio
+async def test_read_file_security(mcp_client):
+    """Test that file reading is restricted to repository"""
+    result = await mcp_client.call_tool("read_file", {
+        "repo": "test-repo-1",
+        "path": "/etc/passwd"
+    })
+    assert len(result) == 1
+    text = result[0]["text"]
+    assert "Error:" in text and "outside repository" in text
 
 
 if __name__ == "__main__":
