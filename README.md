@@ -158,23 +158,19 @@ Add the server to your MCP client configuration (e.g., Claude Desktop):
   "mcpServers": {
     "mcp-build": {
       "command": "python",
-      "args": ["-m", "server"],
-      "env": {
-        "MCP_BUILD_REPOS_DIR": "/home/user/projects"
-      }
+      "args": ["-m", "server"]
     }
   }
 }
 ```
 
+**Note:** The service runs in the current working directory and automatically discovers all git repositories (directories containing `.git`) in that directory.
+
 **Configuration Options:**
-- `MCP_BUILD_REPOS_DIR`: Directory containing your git repositories (defaults to current working directory)
 - `MCP_BUILD_TRANSPORT`: Transport mode - `stdio` (default) or `http`
 - `MCP_BUILD_HOST`: Host to bind HTTP server to (default: `0.0.0.0`)
 - `MCP_BUILD_PORT`: Port for HTTP server (default: `3344`)
 - `MCP_BUILD_SESSION_KEY`: Authentication key for HTTP transport (auto-generated if not provided)
-
-The service will automatically discover all git repositories (directories containing `.git`) in the configured directory.
 
 ### HTTP Transport
 
@@ -199,9 +195,9 @@ export MCP_BUILD_SESSION_KEY=$(python3 -c "import secrets; print(secrets.token_u
 export MCP_BUILD_TRANSPORT=http
 export MCP_BUILD_HOST=0.0.0.0
 export MCP_BUILD_PORT=3344
-export MCP_BUILD_REPOS_DIR=/path/to/repos
 
-# Run the server (it will display the session key if not set)
+# Change to your repositories directory and run the server
+cd /path/to/repos
 mcp-build
 ```
 
@@ -265,9 +261,7 @@ curl "http://localhost:3344/sse?key=YOUR_KEY"
     "mcp-build": {
       "command": "python",
       "args": ["-m", "server"],
-      "env": {
-        "MCP_BUILD_REPOS_DIR": "/home/user/my-project/.."
-      }
+      "cwd": "/home/user/my-project/.."
     }
   }
 }
@@ -280,9 +274,7 @@ curl "http://localhost:3344/sse?key=YOUR_KEY"
     "mcp-build": {
       "command": "python",
       "args": ["-m", "server"],
-      "env": {
-        "MCP_BUILD_REPOS_DIR": "/home/user/workspace"
-      }
+      "cwd": "/home/user/workspace"
     }
   }
 }
@@ -394,7 +386,7 @@ await mcp.call_tool("env", {"repo": "project-c"})
 
 ### No repositories found
 Check that:
-1. Your repositories are in the directory specified by `MCP_BUILD_REPOS_DIR`
+1. The service is running in the correct directory (current working directory)
 2. Each repository has a `.git` directory
 3. The service has read permissions for the directory
 
@@ -402,8 +394,8 @@ Check that:
 # Verify repositories are git repos
 ls -la /path/to/repos/*/.git
 
-# Check environment variable
-echo $MCP_BUILD_REPOS_DIR
+# Check current working directory
+pwd
 ```
 
 ### Repository not found error

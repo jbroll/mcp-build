@@ -109,8 +109,7 @@ from helpers.mcp_client import MCPClient
 
 # Context manager usage
 async with MCPClient(
-    ["python", "-m", "server"],
-    env={"MCP_BUILD_REPOS_DIR": "/path/to/repos"}
+    ["python", "-m", "server"]
 ) as client:
     # List available tools
     tools = await client.list_tools()
@@ -252,13 +251,12 @@ The MCP server logs are captured during tests. Check stderr output in test failu
 ### Running Local Server for Manual Testing
 
 ```bash
-# Start server with current directory as repos dir
-MCP_BUILD_REPOS_DIR=. python -m server
-
-# Or with specific directory
-MCP_BUILD_REPOS_DIR=/path/to/repos python -m server
+# Start server in the desired directory
+cd /path/to/repos
+python -m server
 
 # Then use the manual test client to connect
+cd /path/to/mcp-build
 python tests/manual_test.py --repos-dir /path/to/repos
 ```
 
@@ -303,7 +301,6 @@ pip install pytest pytest-asyncio mcp
 
 The tests use the following environment variables:
 
-- `MCP_BUILD_REPOS_DIR` (optional): Directory containing repositories to test against. Tests create temporary repos if not specified.
 - `PYTHONPATH` (optional): Should include the project root for proper imports.
 
 **CI Configuration Examples:**

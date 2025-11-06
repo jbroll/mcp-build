@@ -15,16 +15,13 @@ async def main():
     import subprocess
     import os
 
-    # Start server
-    env = os.environ.copy()
-    env["MCP_BUILD_REPOS_DIR"] = os.getcwd()
-
+    # Start server in the current directory
     proc = await asyncio.create_subprocess_exec(
         "python", "-m", "mcp_build.server",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
-        env=env
+        cwd=os.getcwd()
     )
 
     print("Server started...")

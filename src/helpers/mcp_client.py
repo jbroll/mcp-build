@@ -20,16 +20,18 @@ logger = logging.getLogger("mcp-test-client")
 class MCPClient:
     """Client for communicating with MCP server via stdio"""
 
-    def __init__(self, server_command: List[str], env: Optional[Dict[str, str]] = None):
+    def __init__(self, server_command: List[str], env: Optional[Dict[str, str]] = None, cwd: Optional[str] = None):
         """
         Initialize MCP client
 
         Args:
             server_command: Command to start the server (e.g., ["python", "-m", "mcp_build_environment.server"])
             env: Environment variables to pass to the server
+            cwd: Working directory for the server process
         """
         self.server_command = server_command
         self.env = env or {}
+        self.cwd = cwd
         self.process: Optional[asyncio.subprocess.Process] = None
         self.request_id = 0
         self._initialized = False
@@ -37,6 +39,8 @@ class MCPClient:
     async def start(self) -> None:
         """Start the MCP server subprocess"""
         logger.info(f"Starting MCP server: {' '.join(self.server_command)}")
+        if self.cwd:
+            logger.info(f"Working directory: {self.cwd}")
 
         # Merge current env with custom env
         full_env = os.environ.copy()
@@ -47,7 +51,8 @@ class MCPClient:
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=full_env
+            env=full_env,
+            cwd=self.cwd
         )
 
         logger.info("MCP server process started")
@@ -222,9 +227,7 @@ class MCPClient:
 async def test_client_example():
     """Example usage of the MCP client"""
     # Set environment for testing
-    test_env = {
-        "MCP_BUILD_REPOS_DIR": os.getcwd()
-    }
+    test_env = {}
 
     # Create and use client
     async with MCPClient(

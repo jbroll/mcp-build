@@ -41,8 +41,8 @@ logger = logging.getLogger("mcp-build")
 # Configuration
 ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
 
-# Base directory for repositories - defaults to current working directory
-REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", os.getcwd()))
+# Base directory for repositories - always uses current working directory
+REPOS_BASE_DIR = Path(os.getcwd())
 
 # HTTP Transport Configuration
 TRANSPORT_MODE = os.environ.get("MCP_BUILD_TRANSPORT", "stdio").lower()
