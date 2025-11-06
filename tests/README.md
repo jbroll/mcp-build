@@ -102,10 +102,10 @@ Comprehensive integration test suite with 24 tests covering:
 
 ### `mcp_client.py`
 
-Reusable MCP client implementation for testing:
+Reusable MCP client implementation for testing (located in `src/mcp_build_environment/helpers/`):
 
 ```python
-from tests.mcp_client import MCPClient
+from mcp_build_environment.helpers.mcp_client import MCPClient
 
 # Context manager usage
 async with MCPClient(
@@ -281,18 +281,94 @@ These are cleaned up after tests complete.
 
 ## Continuous Integration
 
-To run tests in CI:
+### CI Environment Setup
 
+To run tests in a CI/CD environment, ensure the following requirements are met:
+
+**System Dependencies:**
+- Python 3.10 or higher
+- Git (version 2.x or higher)
+- Make (GNU Make or compatible)
+
+**Python Dependencies:**
 ```bash
-# Install dependencies
+# Install package with development dependencies
 pip install -e ".[dev]"
 
-# Run tests with coverage
+# Or install specific test dependencies
+pip install pytest pytest-asyncio mcp
+```
+
+**Environment Variables:**
+
+The tests use the following environment variables:
+
+- `MCP_BUILD_REPOS_DIR` (optional): Directory containing repositories to test against. Tests create temporary repos if not specified.
+- `PYTHONPATH` (optional): Should include the project root for proper imports.
+
+**CI Configuration Examples:**
+
+For GitHub Actions:
+```yaml
+name: Tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make git
+          pip install -e ".[dev]"
+      - name: Run tests
+        run: pytest tests/test_integration.py -v --tb=short
+```
+
+For GitLab CI:
+```yaml
+test:
+  image: python:3.10
+  before_script:
+    - apt-get update && apt-get install -y make git
+    - pip install -e ".[dev]"
+  script:
+    - pytest tests/test_integration.py -v --tb=short
+```
+
+### Running Tests in CI
+
+```bash
+# Basic test run
 pytest tests/test_integration.py -v --tb=short
 
-# Run with coverage report
+# Run with coverage
 pytest tests/test_integration.py --cov=mcp_build_environment --cov-report=html
+
+# Run with junit XML output for CI tools
+pytest tests/test_integration.py --junitxml=test-results.xml
+
+# Run with all options
+pytest tests/test_integration.py -v --tb=short --cov=mcp_build_environment --cov-report=xml --junitxml=test-results.xml
 ```
+
+**Note on Manual Tests:**
+- `manual_test.py` is for interactive testing only and is NOT run in CI
+- `debug_protocol.py` is for debugging and is NOT run in CI
+- `test_single.py` is for quick local debugging and is NOT run in CI
+- Only `test_integration.py` should be executed in automated CI pipelines
+
+### CI Best Practices
+
+1. **Test Isolation**: Each test creates its own MCP server instance and temporary repositories
+2. **Cleanup**: Temporary test data in `/tmp/mcp-build-test-repos/` is automatically cleaned up
+3. **Timeout**: Consider setting a test timeout (e.g., `pytest --timeout=300`)
+4. **Parallelization**: Tests currently run sequentially due to stdio communication; avoid using pytest-xdist
+5. **Caching**: Cache pip dependencies to speed up CI runs
 
 ## Troubleshooting
 

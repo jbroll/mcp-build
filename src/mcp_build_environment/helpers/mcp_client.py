@@ -8,6 +8,7 @@ It handles the full MCP protocol including initialization and tool calls.
 import asyncio
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 from pathlib import Path
 import sys
@@ -38,9 +39,8 @@ class MCPClient:
         logger.info(f"Starting MCP server: {' '.join(self.server_command)}")
 
         # Merge current env with custom env
-        import os
         full_env = os.environ.copy()
-        full_env.update(self.env)
+        full_env |= self.env
 
         self.process = await asyncio.create_subprocess_exec(
             *self.server_command,
@@ -221,8 +221,6 @@ class MCPClient:
 
 async def test_client_example():
     """Example usage of the MCP client"""
-    import os
-
     # Set environment for testing
     test_env = {
         "MCP_BUILD_REPOS_DIR": os.getcwd()
