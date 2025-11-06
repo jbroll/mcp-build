@@ -32,7 +32,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse, PlainTextResponse
 from starlette.requests import Request
 import uvicorn
 
@@ -707,9 +707,35 @@ class BuildEnvironmentServer:
             logger.error(f"Error setting up git stream: {e}", exc_info=True)
             return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+    async def serve_documentation(self, request: Request):
+        """GET /mcp-build.md - Serve the MCP-BUILD.md documentation"""
+        # Documentation endpoint is public - no authentication required
+        try:
+            doc_path = Path(__file__).parent.parent / "MCP-BUILD.md"
+            if not doc_path.exists():
+                return PlainTextResponse(
+                    "Documentation not found. Please see README.md in the mcp-build repository.",
+                    status_code=404
+                )
+
+            content = doc_path.read_text()
+            return PlainTextResponse(
+                content,
+                media_type="text/markdown",
+                headers={
+                    "Cache-Control": "public, max-age=300",  # Cache for 5 minutes
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error serving documentation: {e}", exc_info=True)
+            return PlainTextResponse(f"Error loading documentation: {str(e)}", status_code=500)
+
     def create_http_app(self):
         """Create Starlette ASGI application for HTTP transport"""
         routes = [
+            # Documentation endpoint (public, no auth required)
+            Route("/mcp-build.md", endpoint=self.serve_documentation, methods=["GET"]),
+
             # MCP Protocol endpoint (backwards compatibility)
             Route("/sse", endpoint=self.handle_sse, methods=["GET"]),
 
@@ -741,6 +767,8 @@ class BuildEnvironmentServer:
         app = self.create_http_app()
 
         logger.info(f"MCP Build Server starting with HTTP transport on {HTTP_HOST}:{HTTP_PORT}")
+        logger.info(f"")
+        logger.info(f"Documentation: http://{HTTP_HOST}:{HTTP_PORT}/mcp-build.md")
         logger.info(f"")
         logger.info(f"Available endpoints:")
         logger.info(f"  MCP Protocol (SSE): http://{HTTP_HOST}:{HTTP_PORT}/sse")
