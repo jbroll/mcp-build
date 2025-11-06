@@ -39,9 +39,10 @@ else
     echo "⚠ git not found - git is required for repository operations"
 fi
 
-echo ""
-echo "Installing Python package..."
-pip3 install -e .
+if [ ! -d venv ] ; then
+    python3 -m venv venv
+    ./venv/bin/pip install mcp
+fi
 
 echo ""
 echo "=== Setup Complete ==="
