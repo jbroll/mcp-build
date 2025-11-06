@@ -31,8 +31,8 @@ logger = logging.getLogger("mcp-build")
 # Configuration
 ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
 
-# Base directory for repositories - defaults to current working directory
-REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", os.getcwd()))
+# Base directory for repositories - defaults to parent directory (..)
+REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", "..")).resolve()
 
 
 class BuildEnvironmentServer:
@@ -43,9 +43,19 @@ class BuildEnvironmentServer:
         self.repos: Dict[str, Dict[str, str]] = {}
         self.current_repo: str | None = None
 
-        # Register handlers
-        self.server.list_tools = self.list_tools
-        self.server.call_tool = self.call_tool
+        # Register handlers using decorators
+        self.setup_handlers()
+
+    def setup_handlers(self):
+        """Setup request handlers"""
+
+        @self.server.list_tools()
+        async def handle_list_tools() -> List[Tool]:
+            return await self.list_tools()
+
+        @self.server.call_tool()
+        async def handle_call_tool(name: str, arguments: Any) -> List[TextContent]:
+            return await self.call_tool(name, arguments)
 
     async def discover_repos(self):
         """Discover repositories by scanning the base directory for git repos"""
