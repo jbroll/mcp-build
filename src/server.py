@@ -10,6 +10,7 @@ Provides build environment access via MCP protocol with commands:
 - env: Show environment information and tool versions
 """
 
+import argparse
 import asyncio
 import json
 import logging
@@ -44,24 +45,11 @@ ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
 # Base directory for repositories - always uses current working directory
 REPOS_BASE_DIR = Path(os.getcwd())
 
-# HTTP Transport Configuration
-TRANSPORT_MODE = os.environ.get("MCP_BUILD_TRANSPORT", "stdio").lower()
-HTTP_HOST = os.environ.get("MCP_BUILD_HOST", "0.0.0.0")
-HTTP_PORT = int(os.environ.get("MCP_BUILD_PORT", "3344"))
-
-# Session Key for HTTP Authentication
-# Generate a random session key if not provided
-_SESSION_KEY = os.environ.get("MCP_BUILD_SESSION_KEY")
-if not _SESSION_KEY and TRANSPORT_MODE == "http":
-    _SESSION_KEY = secrets.token_urlsafe(32)
-    logger.warning("=" * 80)
-    logger.warning("No MCP_BUILD_SESSION_KEY provided. Generated session key:")
-    logger.warning(f"  {_SESSION_KEY}")
-    logger.warning("Set this in your environment to persist across restarts:")
-    logger.warning(f"  export MCP_BUILD_SESSION_KEY={_SESSION_KEY}")
-    logger.warning("=" * 80)
-
-SESSION_KEY = _SESSION_KEY
+# Global configuration variables (set by parse_args)
+TRANSPORT_MODE = "stdio"
+HTTP_HOST = "0.0.0.0"
+HTTP_PORT = 3344
+SESSION_KEY = None
 
 
 def verify_session_key(request: Request) -> bool:
@@ -447,8 +435,88 @@ class BuildEnvironmentServer:
         await server.serve()
 
 
+def parse_args():
+    """Parse command-line arguments"""
+    parser = argparse.ArgumentParser(
+        description="MCP Build Service - Provides build environment access via MCP protocol",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Start with default stdio transport
+  %(prog)s
+
+  # Start with HTTP transport
+  %(prog)s --transport http --host 0.0.0.0 --port 3344
+
+  # Start with HTTP transport and custom session key
+  %(prog)s --transport http --session-key my-secret-key
+
+  # Start with HTTP transport and auto-generated session key
+  %(prog)s --transport http --generate-key
+        """
+    )
+
+    parser.add_argument(
+        "--transport",
+        choices=["stdio", "http"],
+        default="stdio",
+        help="Transport mode (default: stdio)"
+    )
+
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Host address for HTTP transport (default: 0.0.0.0)"
+    )
+
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=3344,
+        help="Port for HTTP transport (default: 3344)"
+    )
+
+    parser.add_argument(
+        "--session-key",
+        help="Session key for HTTP authentication (required for HTTP transport unless --generate-key is used)"
+    )
+
+    parser.add_argument(
+        "--generate-key",
+        action="store_true",
+        help="Auto-generate a random session key for HTTP transport"
+    )
+
+    return parser.parse_args()
+
+
 async def main():
     """Main async entry point"""
+    global TRANSPORT_MODE, HTTP_HOST, HTTP_PORT, SESSION_KEY
+
+    # Parse command-line arguments
+    args = parse_args()
+
+    # Set configuration from arguments
+    TRANSPORT_MODE = args.transport.lower()
+    HTTP_HOST = args.host
+    HTTP_PORT = args.port
+
+    # Handle session key
+    if args.session_key:
+        SESSION_KEY = args.session_key
+    elif args.generate_key or TRANSPORT_MODE == "http":
+        # Generate a random session key if not provided and in HTTP mode
+        if TRANSPORT_MODE == "http" and not args.session_key:
+            SESSION_KEY = secrets.token_urlsafe(32)
+            logger.warning("=" * 80)
+            logger.warning("Generated session key for HTTP transport:")
+            logger.warning(f"  {SESSION_KEY}")
+            logger.warning("To reuse this key, start the server with:")
+            logger.warning(f"  {' '.join(['mcp-build-server', '--transport', 'http', '--session-key', SESSION_KEY])}")
+            logger.warning("=" * 80)
+
+    # Create and run server
     server = BuildEnvironmentServer()
 
     if TRANSPORT_MODE == "http":

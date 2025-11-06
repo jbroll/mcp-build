@@ -166,11 +166,31 @@ Add the server to your MCP client configuration (e.g., Claude Desktop):
 
 **Note:** The service runs in the current working directory and automatically discovers all git repositories (directories containing `.git`) in that directory.
 
-**Configuration Options:**
-- `MCP_BUILD_TRANSPORT`: Transport mode - `stdio` (default) or `http`
-- `MCP_BUILD_HOST`: Host to bind HTTP server to (default: `0.0.0.0`)
-- `MCP_BUILD_PORT`: Port for HTTP server (default: `3344`)
-- `MCP_BUILD_SESSION_KEY`: Authentication key for HTTP transport (auto-generated if not provided)
+**Command-Line Options:**
+
+```bash
+# View all available options
+mcp-build --help
+
+# Start with default stdio transport
+mcp-build
+
+# Start with HTTP transport (auto-generates session key)
+mcp-build --transport http
+
+# Start with HTTP transport and custom session key
+mcp-build --transport http --session-key YOUR_SECRET_KEY
+
+# Start with HTTP transport on custom host and port
+mcp-build --transport http --host 127.0.0.1 --port 8080
+```
+
+**Available Arguments:**
+- `--transport {stdio,http}`: Transport mode (default: stdio)
+- `--host HOST`: Host address for HTTP transport (default: 0.0.0.0)
+- `--port PORT`: Port for HTTP transport (default: 3344)
+- `--session-key KEY`: Session key for HTTP authentication
+- `--generate-key`: Auto-generate a random session key for HTTP transport
 
 ### HTTP Transport
 
@@ -182,23 +202,19 @@ The service supports HTTP transport using Server-Sent Events (SSE) for remote ac
 **Authentication:**
 
 HTTP transport requires a session key for authentication. You can either:
-1. Set `MCP_BUILD_SESSION_KEY` environment variable with your own key
+1. Provide your own key using `--session-key YOUR_KEY`
 2. Let the server auto-generate a secure random key (displayed on startup)
 
 **Starting with HTTP transport:**
 
 ```bash
-# Generate a secure session key
-export MCP_BUILD_SESSION_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
-
-# Set environment variables
-export MCP_BUILD_TRANSPORT=http
-export MCP_BUILD_HOST=0.0.0.0
-export MCP_BUILD_PORT=3344
-
-# Change to your repositories directory and run the server
+# Start with auto-generated session key
 cd /path/to/repos
-mcp-build
+mcp-build --transport http
+
+# Or provide your own session key
+cd /path/to/repos
+mcp-build --transport http --session-key $(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
 ```
 
 The service will start an HTTP server with an SSE endpoint at:
