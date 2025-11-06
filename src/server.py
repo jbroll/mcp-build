@@ -17,8 +17,10 @@ import logging
 import os
 import secrets
 import signal
+import socket
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -32,7 +34,7 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse, StreamingResponse
+from starlette.responses import JSONResponse, StreamingResponse, PlainTextResponse
 from starlette.requests import Request
 import uvicorn
 
@@ -52,6 +54,7 @@ REPOS_BASE_DIR = Path(os.getcwd())
 TRANSPORT_MODE = "stdio"
 HTTP_HOST = "0.0.0.0"
 HTTP_PORT = 3344
+EXTERNAL_HOST = None  # External hostname for display/docs (defaults to socket.gethostname())
 SESSION_KEY = None
 
 
@@ -707,9 +710,35 @@ class BuildEnvironmentServer:
             logger.error(f"Error setting up git stream: {e}", exc_info=True)
             return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+    async def serve_documentation(self, request: Request):
+        """GET /mcp-build.md - Serve the MCP-BUILD.md documentation"""
+        # Documentation endpoint is public - no authentication required
+        try:
+            doc_path = Path(__file__).parent.parent / "MCP-BUILD.md"
+            if not doc_path.exists():
+                return PlainTextResponse(
+                    "Documentation not found. Please see README.md in the mcp-build repository.",
+                    status_code=404
+                )
+
+            content = doc_path.read_text()
+            return PlainTextResponse(
+                content,
+                media_type="text/markdown",
+                headers={
+                    "Cache-Control": "public, max-age=300",  # Cache for 5 minutes
+                }
+            )
+        except Exception as e:
+            logger.error(f"Error serving documentation: {e}", exc_info=True)
+            return PlainTextResponse(f"Error loading documentation: {str(e)}", status_code=500)
+
     def create_http_app(self):
         """Create Starlette ASGI application for HTTP transport"""
         routes = [
+            # Documentation endpoint (public, no auth required)
+            Route("/mcp-build.md", endpoint=self.serve_documentation, methods=["GET"]),
+
             # MCP Protocol endpoint (backwards compatibility)
             Route("/sse", endpoint=self.handle_sse, methods=["GET"]),
 
@@ -740,10 +769,15 @@ class BuildEnvironmentServer:
         await self.discover_repos()
         app = self.create_http_app()
 
+        # Use external hostname for display (not bind address)
+        display_host = EXTERNAL_HOST if EXTERNAL_HOST else HTTP_HOST
+
         logger.info(f"MCP Build Server starting with HTTP transport on {HTTP_HOST}:{HTTP_PORT}")
         logger.info(f"")
+        logger.info(f"Documentation: http://{display_host}:{HTTP_PORT}/mcp-build.md")
+        logger.info(f"")
         logger.info(f"Available endpoints:")
-        logger.info(f"  MCP Protocol (SSE): http://{HTTP_HOST}:{HTTP_PORT}/sse")
+        logger.info(f"  MCP Protocol (SSE): http://{display_host}:{HTTP_PORT}/sse")
         logger.info(f"")
         logger.info(f"  REST API (Quick Operations):")
         logger.info(f"    GET  /api/repos - List repositories")
@@ -759,6 +793,13 @@ class BuildEnvironmentServer:
             logger.info("Authentication: Session key required")
             logger.info("  Header: Authorization: Bearer <session-key>")
             logger.info("  Or query param: ?key=<session-key>")
+            logger.info("")
+            logger.warning("=" * 80)
+            logger.warning("Copy-paste this message to AI agents:")
+            logger.warning("")
+            logger.warning(f"Use the MCP build service described at http://{display_host}:{HTTP_PORT}/mcp-build.md")
+            logger.warning(f"Session key: {SESSION_KEY}")
+            logger.warning("=" * 80)
         else:
             logger.warning("Authentication: DISABLED (no session key configured)")
 
@@ -770,6 +811,29 @@ class BuildEnvironmentServer:
         )
         server = uvicorn.Server(config)
         await server.serve()
+
+
+def detect_public_ip(timeout=5):
+    """Detect public IP address using external service"""
+    services = [
+        "https://api.ipify.org",
+        "https://checkip.amazonaws.com",
+        "https://icanhazip.com"
+    ]
+
+    for service in services:
+        try:
+            logger.info(f"Detecting public IP from {service}...")
+            with urllib.request.urlopen(service, timeout=timeout) as response:
+                ip = response.read().decode('utf-8').strip()
+                logger.info(f"Detected public IP: {ip}")
+                return ip
+        except Exception as e:
+            logger.debug(f"Failed to get IP from {service}: {e}")
+            continue
+
+    logger.warning("Could not detect public IP address")
+    return None
 
 
 def setup_signal_handlers():
@@ -804,14 +868,20 @@ Examples:
   # Start with default stdio transport
   %(prog)s
 
-  # Start with HTTP transport
-  %(prog)s --transport http --host 0.0.0.0 --port 3344
+  # Start with HTTP transport (auto-generates session key)
+  %(prog)s --transport http
 
   # Start with HTTP transport and custom session key
   %(prog)s --transport http --session-key my-secret-key
 
-  # Start with HTTP transport and auto-generated session key
-  %(prog)s --transport http --generate-key
+  # Start with HTTP transport and specify external hostname for display
+  %(prog)s --transport http --external-host example.com
+
+  # Start with HTTP and auto-detect public IP (useful behind NAT/router)
+  %(prog)s --transport http --detect-public-ip
+
+  # Combine: use public IP detection with custom session key
+  %(prog)s --transport http --detect-public-ip --session-key my-key
         """
     )
 
@@ -836,6 +906,17 @@ Examples:
     )
 
     parser.add_argument(
+        "--external-host",
+        help="External hostname/IP for documentation URLs (default: auto-detected from system hostname)"
+    )
+
+    parser.add_argument(
+        "--detect-public-ip",
+        action="store_true",
+        help="Auto-detect public IP address using external service (useful when behind NAT/router)"
+    )
+
+    parser.add_argument(
         "--session-key",
         help="Session key for HTTP authentication (required for HTTP transport unless --generate-key is used)"
     )
@@ -851,7 +932,7 @@ Examples:
 
 async def main():
     """Main async entry point"""
-    global TRANSPORT_MODE, HTTP_HOST, HTTP_PORT, SESSION_KEY
+    global TRANSPORT_MODE, HTTP_HOST, HTTP_PORT, EXTERNAL_HOST, SESSION_KEY
 
     # Parse command-line arguments
     args = parse_args()
@@ -860,6 +941,25 @@ async def main():
     TRANSPORT_MODE = args.transport.lower()
     HTTP_HOST = args.host
     HTTP_PORT = args.port
+
+    # Set external hostname for display purposes
+    if args.external_host:
+        EXTERNAL_HOST = args.external_host
+    elif args.detect_public_ip:
+        # Detect public IP address
+        EXTERNAL_HOST = detect_public_ip()
+        if not EXTERNAL_HOST:
+            # Fallback to local hostname if detection fails
+            try:
+                EXTERNAL_HOST = socket.gethostname()
+            except Exception:
+                EXTERNAL_HOST = "localhost"
+    else:
+        # Auto-detect local hostname
+        try:
+            EXTERNAL_HOST = socket.gethostname()
+        except Exception:
+            EXTERNAL_HOST = "localhost"
 
     # Handle session key
     if args.session_key:
@@ -871,8 +971,9 @@ async def main():
             logger.warning("=" * 80)
             logger.warning("Generated session key for HTTP transport:")
             logger.warning(f"  {SESSION_KEY}")
+            logger.warning("")
             logger.warning("To reuse this key, start the server with:")
-            logger.warning(f"  {' '.join(['mcp-build-server', '--transport', 'http', '--session-key', SESSION_KEY])}")
+            logger.warning(f"  mcp-build --transport http --session-key {SESSION_KEY}")
             logger.warning("=" * 80)
 
     # Set up signal handlers for immediate shutdown
