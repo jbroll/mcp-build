@@ -14,13 +14,23 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
+from mcp.server.sse import SseServerTransport
 from mcp.types import Tool, TextContent
+
+from starlette.applications import Starlette
+from starlette.routing import Route
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
+from starlette.requests import Request
+import uvicorn
 
 from validators import validate_git_args, validate_make_args, validate_ls_args, validate_path
 
@@ -33,6 +43,46 @@ ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
 
 # Base directory for repositories - defaults to current working directory
 REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", os.getcwd()))
+
+# HTTP Transport Configuration
+TRANSPORT_MODE = os.environ.get("MCP_BUILD_TRANSPORT", "stdio").lower()
+HTTP_HOST = os.environ.get("MCP_BUILD_HOST", "0.0.0.0")
+HTTP_PORT = int(os.environ.get("MCP_BUILD_PORT", "3344"))
+
+# Session Key for HTTP Authentication
+# Generate a random session key if not provided
+_SESSION_KEY = os.environ.get("MCP_BUILD_SESSION_KEY")
+if not _SESSION_KEY and TRANSPORT_MODE == "http":
+    _SESSION_KEY = secrets.token_urlsafe(32)
+    logger.warning("=" * 80)
+    logger.warning("No MCP_BUILD_SESSION_KEY provided. Generated session key:")
+    logger.warning(f"  {_SESSION_KEY}")
+    logger.warning("Set this in your environment to persist across restarts:")
+    logger.warning(f"  export MCP_BUILD_SESSION_KEY={_SESSION_KEY}")
+    logger.warning("=" * 80)
+
+SESSION_KEY = _SESSION_KEY
+
+
+def verify_session_key(request: Request) -> bool:
+    """Verify the session key from request headers or query parameters"""
+    if not SESSION_KEY:
+        # If no session key is configured, allow access (stdio mode)
+        return True
+
+    # Check Authorization header (Bearer token)
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        if secrets.compare_digest(token, SESSION_KEY):
+            return True
+
+    # Check query parameter
+    query_key = request.query_params.get("key", "")
+    if query_key and secrets.compare_digest(query_key, SESSION_KEY):
+        return True
+
+    return False
 
 
 class BuildEnvironmentServer:
@@ -324,21 +374,88 @@ class BuildEnvironmentServer:
             raise
 
     async def run(self):
-        """Start the MCP server"""
+        """Start the MCP server with stdio transport"""
         await self.discover_repos()
         async with stdio_server() as (read_stream, write_stream):
-            logger.info("MCP Build Server starting...")
+            logger.info("MCP Build Server starting with stdio transport...")
             await self.server.run(
                 read_stream,
                 write_stream,
                 self.server.create_initialization_options()
             )
 
+    async def handle_sse(self, request):
+        """Handle SSE endpoint for HTTP transport"""
+        # Verify authentication
+        if not verify_session_key(request):
+            logger.warning(f"Unauthorized SSE connection attempt from {request.client.host}")
+            return JSONResponse(
+                {"error": "Unauthorized", "message": "Invalid or missing session key"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"}
+            )
+
+        logger.info(f"SSE connection established from {request.client.host}")
+        sse_transport = SseServerTransport("/messages")
+
+        async with sse_transport.connect_sse(
+            request.scope,
+            request.receive,
+            request._send
+        ) as (read_stream, write_stream):
+            init_options = self.server.create_initialization_options()
+            await self.server.run(read_stream, write_stream, init_options)
+
+    def create_http_app(self):
+        """Create Starlette ASGI application for HTTP transport"""
+        routes = [
+            Route("/sse", endpoint=self.handle_sse, methods=["GET"])
+        ]
+
+        middleware = [
+            Middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_methods=["*"],
+                allow_headers=["*"]
+            )
+        ]
+
+        return Starlette(debug=True, routes=routes, middleware=middleware)
+
+    async def run_http(self):
+        """Start the MCP server with HTTP transport"""
+        await self.discover_repos()
+        app = self.create_http_app()
+
+        logger.info(f"MCP Build Server starting with HTTP transport on {HTTP_HOST}:{HTTP_PORT}")
+        logger.info(f"SSE endpoint: http://{HTTP_HOST}:{HTTP_PORT}/sse")
+        if SESSION_KEY:
+            logger.info("Authentication: Session key required")
+            logger.info("Connect with: Authorization: Bearer <session-key>")
+            logger.info("Or use query parameter: ?key=<session-key>")
+        else:
+            logger.warning("Authentication: DISABLED (no session key configured)")
+
+        config = uvicorn.Config(
+            app,
+            host=HTTP_HOST,
+            port=HTTP_PORT,
+            log_level="info"
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
+
 
 async def main():
     """Main async entry point"""
     server = BuildEnvironmentServer()
-    await server.run()
+
+    if TRANSPORT_MODE == "http":
+        await server.run_http()
+    else:
+        # Default to stdio
+        await server.run()
 
 
 def cli():
