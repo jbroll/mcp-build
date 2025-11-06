@@ -170,7 +170,10 @@ Add the server to your MCP client configuration (e.g., Claude Desktop):
 **Configuration Options:**
 - `MCP_BUILD_REPOS_DIR`: Directory containing your git repositories (defaults to current working directory)
 
-The service will automatically discover all git repositories (directories containing `.git`) in the configured directory.
+The service will automatically discover git repositories:
+- If the configured directory itself is a git repository, it will be used
+- Any subdirectories containing `.git` will also be discovered
+- This allows working with both single repositories and multi-repository workspaces
 
 ### Example Configuration for Different Setups
 
@@ -182,7 +185,7 @@ The service will automatically discover all git repositories (directories contai
       "command": "python",
       "args": ["-m", "mcp_build_environment.server"],
       "env": {
-        "MCP_BUILD_REPOS_DIR": "/home/user/my-project/.."
+        "MCP_BUILD_REPOS_DIR": "/home/user/my-project"
       }
     }
   }
@@ -240,9 +243,22 @@ mcp-build/
 
 ### Running Tests
 
+The test suite includes a comprehensive MCP client that tests all server functionality:
+
 ```bash
-pytest tests/
+# Run the complete test suite (manually tests all tools)
+python tests/test_mcp_simple.py
+
+# Or run with pytest (when pytest-asyncio is installed)
+pytest tests/test_validators.py
 ```
+
+The test suite validates:
+- Server initialization and MCP protocol compliance
+- All tool operations (list, make, git, ls, env)
+- Security validations (blocks dangerous git commands, path traversal)
+- Multi-repository support
+- Error handling
 
 ### Code Formatting
 
