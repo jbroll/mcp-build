@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mcp-build-environment"
-version = "0.1.0"
-description = "MCP server providing build environment access for repositories"
+name = "mcp-build"
+version = "0.2.0"
+description = "MCP server for executing build commands across multiple repositories"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-mcp-build-environment = "mcp_build_environment.server:main"
+mcp-build = "mcp_build_environment.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

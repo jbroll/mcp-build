@@ -1,19 +1,20 @@
-# MCP Build Environment Service
+# MCP Build Service
 
-A Model Context Protocol (MCP) server that provides secure access to build environments for software projects. This service allows AI assistants to interact with containerized build environments, execute builds, run tests, and manage git operations without requiring local installation of all dependencies.
+A Model Context Protocol (MCP) server that provides secure access to software project repositories for build operations. This service allows AI assistants to execute builds, run tests, and manage git operations across multiple repositories in a controlled manner.
 
 ## Features
 
-- **Isolated Build Environment**: Docker-based environment with all build dependencies pre-installed
+- **Automatic Repository Discovery**: Discovers git repositories in the configured directory
 - **Safe Command Execution**: Validated commands to prevent accidental harmful operations
-- **Git Operations**: Limited to safe operations (status, log, checkout, pull, branch, diff)
+- **Git Operations**: Limited to safe operations (status, log, checkout, pull, branch, diff, fetch, show)
 - **Build Management**: Execute make targets, run tests, and manage build artifacts
 - **Environment Inspection**: Query installed tools, versions, and environment variables
+- **Multi-Repository Support**: Work with multiple repositories from a single service
 
 ## Available Commands
 
 ### `list`
-List all available repositories with build environments.
+List all available repositories discovered in the service directory.
 
 **Example:**
 ```json
@@ -23,7 +24,7 @@ List all available repositories with build environments.
 ```
 
 ### `make`
-Run make command with specified arguments.
+Run make command with specified arguments in a repository.
 
 **Parameters:**
 - `args` (optional): Arguments to pass to make (e.g., "clean", "all", "test")
@@ -40,7 +41,8 @@ Run make command with specified arguments.
 ```json
 {
   "tool": "make",
-  "args": "test"
+  "args": "test",
+  "repo": "my-project"
 }
 ```
 
@@ -51,7 +53,7 @@ Run git commands (limited to safe operations).
 
 **Parameters:**
 - `args` (required): Git command and arguments
-- `repo` (optional): Repository name
+- `repo` (optional): Repository name (uses default if not specified)
 
 **Examples:**
 ```json
@@ -71,16 +73,17 @@ Run git commands (limited to safe operations).
 ```json
 {
   "tool": "git",
-  "args": "log --oneline -10"
+  "args": "log --oneline -10",
+  "repo": "my-project"
 }
 ```
 
 ### `ls`
-List files and directories in the build environment.
+List files and directories in a repository.
 
 **Parameters:**
 - `args` (optional): Arguments to pass to ls (e.g., "-la", "-lh build/")
-- `repo` (optional): Repository name
+- `repo` (optional): Repository name (uses default if not specified)
 
 **Examples:**
 ```json
@@ -93,15 +96,16 @@ List files and directories in the build environment.
 ```json
 {
   "tool": "ls",
-  "args": "-lh build/"
+  "args": "-lh build/",
+  "repo": "my-project"
 }
 ```
 
 ### `env`
-Show build environment information including installed tools and versions.
+Show environment information including installed tools and versions.
 
 **Parameters:**
-- `repo` (optional): Repository name
+- `repo` (optional): Repository name (uses default if not specified)
 
 **Example:**
 ```json
@@ -114,50 +118,33 @@ Show build environment information including installed tools and versions.
 
 ### Prerequisites
 
-- Docker and Docker Compose
 - Python 3.10 or higher
 - pip
+- Build tools (make, gcc, etc.) installed on your system
+- Git repositories you want to work with
 
 ### Setup Steps
 
 1. **Clone the repository:**
    ```bash
-   cd mcp-build-environment
+   git clone <this-repo-url>
+   cd mcp-build
    ```
 
-2. **Install Python dependencies:**
+2. **Install the service:**
    ```bash
    pip install -e .
    # Or for development:
    pip install -e ".[dev]"
    ```
 
-3. **Build the Docker environment:**
-   ```bash
-   cd docker
-   docker-compose build
-   docker-compose up -d
+3. **Organize your repositories:**
+   Place your git repositories in a directory where the service can discover them. For example:
    ```
-
-4. **Clone your repository into the build environment:**
-   ```bash
-   docker-compose exec build-env git clone <your-repo-url> /build/<repo-name>
-   ```
-
-5. **Update configuration:**
-   Edit `config/repos.json` to add your repositories:
-   ```json
-   {
-     "default_repo": "velocipyde",
-     "repos": {
-       "velocipyde": {
-         "path": "/build/velocipyde",
-         "description": "Velocipyde project",
-         "git_url": "https://github.com/jbroll/velocipyde.git",
-         "default_branch": "main"
-       }
-     }
-   }
+   /home/user/projects/
+   ├── project-a/     (git repo)
+   ├── project-b/     (git repo)
+   └── project-c/     (git repo)
    ```
 
 ## Configuration
@@ -169,36 +156,49 @@ Add the server to your MCP client configuration (e.g., Claude Desktop):
 ```json
 {
   "mcpServers": {
-    "build-environment": {
+    "mcp-build": {
       "command": "python",
       "args": ["-m", "mcp_build_environment.server"],
       "env": {
-        "BUILD_ENV_BASE": "/build"
+        "MCP_BUILD_REPOS_DIR": "/home/user/projects"
       }
     }
   }
 }
 ```
 
-### Repository Configuration
+**Configuration Options:**
+- `MCP_BUILD_REPOS_DIR`: Directory containing your git repositories (defaults to current working directory)
 
-Edit `config/repos.json` to configure available repositories:
+The service will automatically discover all git repositories (directories containing `.git`) in the configured directory.
 
+### Example Configuration for Different Setups
+
+**Single Project:**
 ```json
 {
-  "default_repo": "my-project",
-  "repos": {
-    "my-project": {
-      "path": "/build/my-project",
-      "description": "My awesome project",
-      "git_url": "https://github.com/user/project.git",
-      "default_branch": "main"
-    },
-    "another-project": {
-      "path": "/build/another-project",
-      "description": "Another project",
-      "git_url": "https://github.com/user/another.git",
-      "default_branch": "develop"
+  "mcpServers": {
+    "mcp-build": {
+      "command": "python",
+      "args": ["-m", "mcp_build_environment.server"],
+      "env": {
+        "MCP_BUILD_REPOS_DIR": "/home/user/my-project/.."
+      }
+    }
+  }
+}
+```
+
+**Multiple Projects Directory:**
+```json
+{
+  "mcpServers": {
+    "mcp-build": {
+      "command": "python",
+      "args": ["-m", "mcp_build_environment.server"],
+      "env": {
+        "MCP_BUILD_REPOS_DIR": "/home/user/workspace"
+      }
     }
   }
 }
@@ -220,18 +220,19 @@ This service implements basic security measures to prevent accidents:
 ### Project Structure
 
 ```
-mcp-build-environment/
+mcp-build/
 ├── src/
 │   └── mcp_build_environment/
 │       ├── __init__.py
 │       ├── server.py          # Main MCP server
 │       ├── validators.py      # Argument validation
 │       └── env_info.sh        # Environment info script
-├── config/
-│   └── repos.json             # Repository configuration
-├── docker/
-│   ├── Dockerfile             # Build environment image
-│   └── docker-compose.yml     # Docker Compose config
+├── tests/
+│   ├── __init__.py
+│   └── test_validators.py    # Validator tests
+├── docker/                    # Optional Docker setup
+│   ├── Dockerfile
+│   └── docker-compose.yml
 ├── requirements.txt
 ├── pyproject.toml
 └── README.md
@@ -279,41 +280,61 @@ await mcp.call_tool("make", {"args": "test"})
 await mcp.call_tool("ls", {"args": "-lh build/"})
 ```
 
-### Checking Environment
+### Working with Multiple Repositories
 
 ```python
-# Get environment info
-await mcp.call_tool("env", {})
+# List all discovered repositories
+await mcp.call_tool("list", {})
 
-# Check specific directory
-await mcp.call_tool("ls", {"args": "-la /build/velocipyde"})
+# Check status of specific repo
+await mcp.call_tool("git", {"args": "status", "repo": "project-a"})
+
+# Build a specific repo
+await mcp.call_tool("make", {"args": "all", "repo": "project-b"})
+
+# Get environment info from specific repo
+await mcp.call_tool("env", {"repo": "project-c"})
 ```
 
 ## Troubleshooting
 
-### Container not running
+### No repositories found
+Check that:
+1. Your repositories are in the directory specified by `MCP_BUILD_REPOS_DIR`
+2. Each repository has a `.git` directory
+3. The service has read permissions for the directory
+
 ```bash
-cd docker
-docker-compose ps
-docker-compose up -d
+# Verify repositories are git repos
+ls -la /path/to/repos/*/.git
+
+# Check environment variable
+echo $MCP_BUILD_REPOS_DIR
 ```
 
-### Repository not found
-Ensure the repository is cloned in the container:
-```bash
-docker-compose exec build-env ls -la /build/
+### Repository not found error
+The specified repository name must match the directory name exactly. Use the `list` command to see available repositories:
+```json
+{
+  "tool": "list"
+}
 ```
 
 ### Permission issues
-Ensure the build directory has proper permissions:
+Ensure the service has appropriate permissions to execute commands in your repository directories:
 ```bash
-docker-compose exec build-env chmod -R 755 /build/
+chmod -R u+rwx /path/to/repos/my-project
 ```
 
-### Environment variable not set
-Check that `BUILD_ENV_BASE` is set correctly:
+### Build tools not found
+The `env` command shows installed build tools. If tools are missing, install them on your system:
 ```bash
-docker-compose exec build-env echo $BUILD_ENV_BASE
+# Ubuntu/Debian
+sudo apt-get install build-essential cmake
+
+# macOS
+xcode-select --install
+brew install cmake
 ```
 
 ## Contributing
@@ -339,9 +360,11 @@ For issues and questions:
 
 ## Roadmap
 
-- [ ] Support for multiple concurrent build environments
+- [x] Automatic repository discovery
+- [x] Multi-repository support
 - [ ] Build caching and artifact management
 - [ ] Integration with CI/CD systems
 - [ ] Enhanced security controls
 - [ ] Build history and logs
 - [ ] Performance metrics and monitoring
+- [ ] Support for additional build systems (npm, gradle, cargo, etc.)
