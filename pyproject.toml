@@ -25,13 +25,13 @@ dev = [
 ]
 
 [project.scripts]
-mcp-build = "mcp_build.server:main"
+mcp-build = "server:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+py-modules = ["server", "validators"]
 
 [tool.setuptools.package-data]
-mcp_build = ["*.sh"]
+"*" = ["*.sh"]
 
 [tool.black]
 line-length = 100

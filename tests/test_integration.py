@@ -16,7 +16,7 @@ from pathlib import Path
 import tempfile
 import subprocess
 
-from mcp_build.helpers.mcp_client import MCPClient
+from helpers.mcp_client import MCPClient
 
 
 # Test environment

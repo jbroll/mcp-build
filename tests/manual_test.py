@@ -31,7 +31,7 @@ import os
 # Add parent directory to path to import mcp_client
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mcp_build.helpers.mcp_client import MCPClient
+from helpers.mcp_client import MCPClient
 
 
 async def test_all_tools(client: MCPClient):
