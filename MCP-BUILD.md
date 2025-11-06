@@ -2,6 +2,8 @@
 
 This document describes how to use a remote MCP build service instance for building and testing projects.
 
+> **Note**: This documentation is also available directly from the service at `http://HOST:PORT/mcp-build.md`
+
 ## Quick Start
 
 The MCP build service provides remote access to a build environment where you can:
@@ -15,6 +17,16 @@ The MCP build service provides remote access to a build environment where you ca
 When connecting to an MCP build service, you need:
 - **Service URL**: The HTTP endpoint (e.g., `http://example.com:3344`)
 - **Session Key**: Authentication token for secure access
+
+### Fetching This Documentation
+
+To view this documentation from a running service:
+
+```bash
+curl http://HOST:PORT/mcp-build.md
+```
+
+The documentation endpoint is public and does not require authentication.
 
 ## Available Operations
 
