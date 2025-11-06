@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  build-env:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-build-environment:latest
+    container_name: mcp-build-env
+    volumes:
+      # Mount build directory for persistence
+      - build-data:/build
+      # Mount MCP server code (for development)
+      - ../src:/mcp-server
+    environment:
+      - BUILD_ENV_BASE=/build
+    # Keep container running
+    command: tail -f /dev/null
+    # Resource limits (adjust as needed)
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 8G
+        reservations:
+          cpus: '2'
+          memory: 4G
+
+volumes:
+  build-data:
+    driver: local

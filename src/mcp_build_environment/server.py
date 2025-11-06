@@ -1,0 +1,323 @@
+#!/usr/bin/env python3
+"""
+MCP Build Environment Service
+
+Provides build environment access via MCP protocol with commands:
+- list: Show available repos with build environments
+- make: Run make with specified arguments
+- git: Run git commands (limited to safe operations)
+- ls: List files/directories in build environment
+- env: Show environment information and tool versions
+"""
+
+import asyncio
+import json
+import logging
+import os
+import subprocess
+from pathlib import Path
+from typing import Any, Dict, List
+
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
+
+from .validators import validate_git_args, validate_make_args, validate_ls_args, validate_path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("mcp-build-environment")
+
+# Configuration
+CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
+REPOS_CONFIG = CONFIG_DIR / "repos.json"
+ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
+
+# Build environment base directory
+BUILD_ENV_BASE = os.environ.get("BUILD_ENV_BASE", "/build")
+
+
+class BuildEnvironmentServer:
+    """MCP Server for build environment operations"""
+
+    def __init__(self):
+        self.server = Server("build-environment")
+        self.repos: Dict[str, Dict[str, str]] = {}
+        self.current_repo: str | None = None
+
+        # Register handlers
+        self.server.list_tools = self.list_tools
+        self.server.call_tool = self.call_tool
+
+    async def load_repos(self):
+        """Load repository configuration"""
+        try:
+            with open(REPOS_CONFIG, 'r') as f:
+                config = json.load(f)
+                self.repos = config.get("repos", {})
+                self.current_repo = config.get("default_repo")
+                logger.info(f"Loaded {len(self.repos)} repos from config")
+        except FileNotFoundError:
+            logger.warning(f"Config file not found: {REPOS_CONFIG}")
+            self.repos = {}
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in config file: {e}")
+            self.repos = {}
+
+    def get_repo_path(self, repo_name: str | None = None) -> Path:
+        """Get the path to a repository"""
+        repo = repo_name or self.current_repo
+        if not repo:
+            raise ValueError("No repository specified and no default set")
+        if repo not in self.repos:
+            raise ValueError(f"Unknown repository: {repo}")
+        return Path(BUILD_ENV_BASE) / repo
+
+    async def list_tools(self) -> List[Tool]:
+        """List available MCP tools"""
+        return [
+            Tool(
+                name="list",
+                description="List available repositories with build environments",
+                inputSchema={
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            ),
+            Tool(
+                name="make",
+                description="Run make command with specified arguments in the build environment. "
+                           "Executes make in the root of the checked out repository.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "string",
+                            "description": "Arguments to pass to make (e.g., 'clean', 'all', 'test')"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name (optional, uses default if not specified)"
+                        }
+                    },
+                    "required": []
+                }
+            ),
+            Tool(
+                name="git",
+                description="Run git commands in the build environment. "
+                           "Limited to safe operations: status, log, checkout, pull, branch, diff",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "string",
+                            "description": "Git command and arguments (e.g., 'status', 'checkout main', 'pull origin main')"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name (optional, uses default if not specified)"
+                        }
+                    },
+                    "required": ["args"]
+                }
+            ),
+            Tool(
+                name="ls",
+                description="List files and directories in the build environment. "
+                           "Limited to paths within the repository to prevent path traversal.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "string",
+                            "description": "Arguments to pass to ls (e.g., '-la', '-lh build/')"
+                        },
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name (optional, uses default if not specified)"
+                        }
+                    },
+                    "required": []
+                }
+            ),
+            Tool(
+                name="env",
+                description="Show build environment information including environment variables "
+                           "and versions of key build tools (gcc, g++, python, make, cmake, etc.)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "repo": {
+                            "type": "string",
+                            "description": "Repository name (optional, uses default if not specified)"
+                        }
+                    },
+                    "required": []
+                }
+            )
+        ]
+
+    async def call_tool(self, name: str, arguments: Any) -> List[TextContent]:
+        """Handle tool execution"""
+        try:
+            if name == "list":
+                return await self.handle_list()
+            elif name == "make":
+                return await self.handle_make(arguments)
+            elif name == "git":
+                return await self.handle_git(arguments)
+            elif name == "ls":
+                return await self.handle_ls(arguments)
+            elif name == "env":
+                return await self.handle_env(arguments)
+            else:
+                raise ValueError(f"Unknown tool: {name}")
+        except Exception as e:
+            logger.error(f"Error executing tool {name}: {e}", exc_info=True)
+            return [TextContent(type="text", text=f"Error: {str(e)}")]
+
+    async def handle_list(self) -> List[TextContent]:
+        """Handle list command"""
+        if not self.repos:
+            return [TextContent(type="text", text="No repositories configured")]
+
+        output = "Available repositories:\n\n"
+        for name, info in self.repos.items():
+            marker = " (default)" if name == self.current_repo else ""
+            output += f"- {name}{marker}\n"
+            output += f"  Path: {info.get('path', 'N/A')}\n"
+            output += f"  Description: {info.get('description', 'N/A')}\n\n"
+
+        return [TextContent(type="text", text=output)]
+
+    async def handle_make(self, args: Dict[str, Any]) -> List[TextContent]:
+        """Handle make command"""
+        repo = args.get("repo")
+        make_args = args.get("args", "")
+
+        # Validate arguments
+        validate_make_args(make_args)
+
+        # Get repository path
+        repo_path = self.get_repo_path(repo)
+
+        # Build command
+        cmd = ["make"]
+        if make_args:
+            cmd.extend(make_args.split())
+
+        # Execute
+        result = await self.run_command(cmd, cwd=repo_path)
+        return [TextContent(type="text", text=result)]
+
+    async def handle_git(self, args: Dict[str, Any]) -> List[TextContent]:
+        """Handle git command"""
+        repo = args.get("repo")
+        git_args = args.get("args", "")
+
+        if not git_args:
+            raise ValueError("git command requires arguments")
+
+        # Validate arguments
+        validate_git_args(git_args)
+
+        # Get repository path
+        repo_path = self.get_repo_path(repo)
+
+        # Build command
+        cmd = ["git"] + git_args.split()
+
+        # Execute
+        result = await self.run_command(cmd, cwd=repo_path)
+        return [TextContent(type="text", text=result)]
+
+    async def handle_ls(self, args: Dict[str, Any]) -> List[TextContent]:
+        """Handle ls command"""
+        repo = args.get("repo")
+        ls_args = args.get("args", "")
+
+        # Validate arguments
+        validate_ls_args(ls_args)
+
+        # Get repository path
+        repo_path = self.get_repo_path(repo)
+
+        # Build command
+        cmd = ["ls"]
+        if ls_args:
+            cmd.extend(ls_args.split())
+
+        # Execute
+        result = await self.run_command(cmd, cwd=repo_path)
+        return [TextContent(type="text", text=result)]
+
+    async def handle_env(self, args: Dict[str, Any]) -> List[TextContent]:
+        """Handle env command"""
+        repo = args.get("repo")
+        repo_path = self.get_repo_path(repo)
+
+        # Execute env info script
+        if not ENV_INFO_SCRIPT.exists():
+            raise FileNotFoundError(f"Environment info script not found: {ENV_INFO_SCRIPT}")
+
+        result = await self.run_command([str(ENV_INFO_SCRIPT)], cwd=repo_path)
+        return [TextContent(type="text", text=result)]
+
+    async def run_command(self, cmd: List[str], cwd: Path) -> str:
+        """Run a command in the build environment"""
+        try:
+            # Ensure working directory exists
+            if not cwd.exists():
+                raise FileNotFoundError(f"Repository path does not exist: {cwd}")
+
+            logger.info(f"Executing command: {' '.join(cmd)} in {cwd}")
+
+            # Run command
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=str(cwd),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await process.communicate()
+
+            # Format output
+            output = []
+            if stdout:
+                output.append("=== STDOUT ===")
+                output.append(stdout.decode('utf-8', errors='replace'))
+            if stderr:
+                output.append("=== STDERR ===")
+                output.append(stderr.decode('utf-8', errors='replace'))
+            if process.returncode != 0:
+                output.append(f"\n=== EXIT CODE: {process.returncode} ===")
+
+            return "\n".join(output) if output else "(no output)"
+
+        except Exception as e:
+            logger.error(f"Command execution failed: {e}", exc_info=True)
+            raise
+
+    async def run(self):
+        """Start the MCP server"""
+        await self.load_repos()
+        async with stdio_server() as (read_stream, write_stream):
+            logger.info("Build Environment MCP Server starting...")
+            await self.server.run(
+                read_stream,
+                write_stream,
+                self.server.create_initialization_options()
+            )
+
+
+async def main():
+    """Main entry point"""
+    server = BuildEnvironmentServer()
+    await server.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

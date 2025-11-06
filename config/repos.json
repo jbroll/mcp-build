@@ -1,0 +1,11 @@
+{
+  "default_repo": "velocipyde",
+  "repos": {
+    "velocipyde": {
+      "path": "/build/velocipyde",
+      "description": "Velocipyde - Python-based data processing pipeline",
+      "git_url": "https://github.com/jbroll/velocipyde.git",
+      "default_branch": "main"
+    }
+  }
+}
