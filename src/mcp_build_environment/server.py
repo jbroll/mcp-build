@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-MCP Build Environment Service
+MCP Build Service
 
 Provides build environment access via MCP protocol with commands:
-- list: Show available repos with build environments
+- list: Show available repos
 - make: Run make with specified arguments
 - git: Run git commands (limited to safe operations)
-- ls: List files/directories in build environment
+- ls: List files/directories in repository
 - env: Show environment information and tool versions
 """
 
@@ -26,22 +26,20 @@ from .validators import validate_git_args, validate_make_args, validate_ls_args,
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("mcp-build-environment")
+logger = logging.getLogger("mcp-build")
 
 # Configuration
-CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
-REPOS_CONFIG = CONFIG_DIR / "repos.json"
 ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
 
-# Build environment base directory
-BUILD_ENV_BASE = os.environ.get("BUILD_ENV_BASE", "/build")
+# Base directory for repositories - defaults to current working directory
+REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", os.getcwd()))
 
 
 class BuildEnvironmentServer:
-    """MCP Server for build environment operations"""
+    """MCP Server for build operations"""
 
     def __init__(self):
-        self.server = Server("build-environment")
+        self.server = Server("mcp-build")
         self.repos: Dict[str, Dict[str, str]] = {}
         self.current_repo: str | None = None
 
@@ -49,19 +47,31 @@ class BuildEnvironmentServer:
         self.server.list_tools = self.list_tools
         self.server.call_tool = self.call_tool
 
-    async def load_repos(self):
-        """Load repository configuration"""
+    async def discover_repos(self):
+        """Discover repositories by scanning the base directory for git repos"""
+        self.repos = {}
+
         try:
-            with open(REPOS_CONFIG, 'r') as f:
-                config = json.load(f)
-                self.repos = config.get("repos", {})
-                self.current_repo = config.get("default_repo")
-                logger.info(f"Loaded {len(self.repos)} repos from config")
-        except FileNotFoundError:
-            logger.warning(f"Config file not found: {REPOS_CONFIG}")
-            self.repos = {}
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in config file: {e}")
+            # Scan the base directory for subdirectories containing .git
+            for item in REPOS_BASE_DIR.iterdir():
+                if item.is_dir():
+                    git_dir = item / ".git"
+                    if git_dir.exists():
+                        # This is a git repository
+                        repo_name = item.name
+                        self.repos[repo_name] = {
+                            "path": str(item),
+                            "description": f"Repository at {item.relative_to(REPOS_BASE_DIR)}"
+                        }
+                        # Set first repo as default if none is set
+                        if self.current_repo is None:
+                            self.current_repo = repo_name
+
+            logger.info(f"Discovered {len(self.repos)} repositories in {REPOS_BASE_DIR}")
+            if self.current_repo:
+                logger.info(f"Default repository: {self.current_repo}")
+        except Exception as e:
+            logger.error(f"Error discovering repositories: {e}", exc_info=True)
             self.repos = {}
 
     def get_repo_path(self, repo_name: str | None = None) -> Path:
@@ -71,14 +81,14 @@ class BuildEnvironmentServer:
             raise ValueError("No repository specified and no default set")
         if repo not in self.repos:
             raise ValueError(f"Unknown repository: {repo}")
-        return Path(BUILD_ENV_BASE) / repo
+        return Path(self.repos[repo]["path"])
 
     async def list_tools(self) -> List[Tool]:
         """List available MCP tools"""
         return [
             Tool(
                 name="list",
-                description="List available repositories with build environments",
+                description="List available repositories discovered in the current directory",
                 inputSchema={
                     "type": "object",
                     "properties": {},
@@ -87,8 +97,8 @@ class BuildEnvironmentServer:
             ),
             Tool(
                 name="make",
-                description="Run make command with specified arguments in the build environment. "
-                           "Executes make in the root of the checked out repository.",
+                description="Run make command with specified arguments. "
+                           "Executes make in the root of the specified repository.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -106,8 +116,8 @@ class BuildEnvironmentServer:
             ),
             Tool(
                 name="git",
-                description="Run git commands in the build environment. "
-                           "Limited to safe operations: status, log, checkout, pull, branch, diff",
+                description="Run git commands in a repository. "
+                           "Limited to safe operations: status, log, checkout, pull, branch, diff, fetch, show",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -125,7 +135,7 @@ class BuildEnvironmentServer:
             ),
             Tool(
                 name="ls",
-                description="List files and directories in the build environment. "
+                description="List files and directories in a repository. "
                            "Limited to paths within the repository to prevent path traversal.",
                 inputSchema={
                     "type": "object",
@@ -144,7 +154,7 @@ class BuildEnvironmentServer:
             ),
             Tool(
                 name="env",
-                description="Show build environment information including environment variables "
+                description="Show environment information including environment variables "
                            "and versions of key build tools (gcc, g++, python, make, cmake, etc.)",
                 inputSchema={
                     "type": "object",
@@ -266,7 +276,7 @@ class BuildEnvironmentServer:
         return [TextContent(type="text", text=result)]
 
     async def run_command(self, cmd: List[str], cwd: Path) -> str:
-        """Run a command in the build environment"""
+        """Run a command in a repository directory"""
         try:
             # Ensure working directory exists
             if not cwd.exists():
@@ -303,9 +313,9 @@ class BuildEnvironmentServer:
 
     async def run(self):
         """Start the MCP server"""
-        await self.load_repos()
+        await self.discover_repos()
         async with stdio_server() as (read_stream, write_stream):
-            logger.info("Build Environment MCP Server starting...")
+            logger.info("MCP Build Server starting...")
             await self.server.run(
                 read_stream,
                 write_stream,

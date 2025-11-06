@@ -1,29 +1,15 @@
 #!/bin/bash
 #
-# Setup script for MCP Build Environment Service
+# Setup script for MCP Build Service
 #
 
 set -e
 
-echo "=== MCP Build Environment Setup ==="
+echo "=== MCP Build Service Setup ==="
 echo ""
 
 # Check prerequisites
 echo "Checking prerequisites..."
-
-# Check Docker
-if ! command -v docker &> /dev/null; then
-    echo "ERROR: Docker is not installed. Please install Docker first."
-    exit 1
-fi
-echo "✓ Docker found"
-
-# Check Docker Compose
-if ! command -v docker-compose &> /dev/null; then
-    echo "ERROR: Docker Compose is not installed. Please install Docker Compose first."
-    exit 1
-fi
-echo "✓ Docker Compose found"
 
 # Check Python
 if ! command -v python3 &> /dev/null; then
@@ -40,34 +26,49 @@ if ! command -v pip3 &> /dev/null; then
 fi
 echo "✓ pip3 found"
 
+# Check for basic build tools (optional but recommended)
+if command -v make &> /dev/null; then
+    echo "✓ make found"
+else
+    echo "⚠ make not found - you may want to install build tools"
+fi
+
+if command -v git &> /dev/null; then
+    echo "✓ git found"
+else
+    echo "⚠ git not found - git is required for repository operations"
+fi
+
 echo ""
 echo "Installing Python package..."
 pip3 install -e .
 
 echo ""
-echo "Building Docker image..."
-cd docker
-docker-compose build
-
-echo ""
-echo "Starting Docker container..."
-docker-compose up -d
-
-echo ""
-echo "Waiting for container to be ready..."
-sleep 2
-
-echo ""
 echo "=== Setup Complete ==="
 echo ""
 echo "Next steps:"
-echo "1. Clone your repository into the build environment:"
-echo "   docker-compose exec build-env git clone <repo-url> /build/<repo-name>"
 echo ""
-echo "2. Update config/repos.json with your repository information"
+echo "1. Organize your git repositories in a directory, for example:"
+echo "   /home/user/projects/"
+echo "   ├── project-a/"
+echo "   ├── project-b/"
+echo "   └── project-c/"
 echo ""
-echo "3. Configure your MCP client to use this server"
+echo "2. Configure your MCP client (e.g., Claude Desktop config):"
+echo "   {"
+echo "     \"mcpServers\": {"
+echo "       \"mcp-build\": {"
+echo "         \"command\": \"python\","
+echo "         \"args\": [\"-m\", \"mcp_build_environment.server\"],"
+echo "         \"env\": {"
+echo "           \"MCP_BUILD_REPOS_DIR\": \"/path/to/your/projects\""
+echo "         }"
+echo "       }"
+echo "     }"
+echo "   }"
 echo ""
-echo "To check the build environment:"
-echo "   docker-compose exec build-env bash"
+echo "3. The service will automatically discover all git repositories"
+echo "   in the configured directory."
+echo ""
+echo "For more information, see README.md"
 echo ""
