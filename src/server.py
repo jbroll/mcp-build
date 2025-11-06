@@ -17,6 +17,7 @@ import logging
 import os
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -52,6 +53,7 @@ REPOS_BASE_DIR = Path(os.getcwd())
 TRANSPORT_MODE = "stdio"
 HTTP_HOST = "0.0.0.0"
 HTTP_PORT = 3344
+EXTERNAL_HOST = None  # External hostname for display/docs (defaults to socket.gethostname())
 SESSION_KEY = None
 
 
@@ -766,12 +768,15 @@ class BuildEnvironmentServer:
         await self.discover_repos()
         app = self.create_http_app()
 
+        # Use external hostname for display (not bind address)
+        display_host = EXTERNAL_HOST if EXTERNAL_HOST else HTTP_HOST
+
         logger.info(f"MCP Build Server starting with HTTP transport on {HTTP_HOST}:{HTTP_PORT}")
         logger.info(f"")
-        logger.info(f"Documentation: http://{HTTP_HOST}:{HTTP_PORT}/mcp-build.md")
+        logger.info(f"Documentation: http://{display_host}:{HTTP_PORT}/mcp-build.md")
         logger.info(f"")
         logger.info(f"Available endpoints:")
-        logger.info(f"  MCP Protocol (SSE): http://{HTTP_HOST}:{HTTP_PORT}/sse")
+        logger.info(f"  MCP Protocol (SSE): http://{display_host}:{HTTP_PORT}/sse")
         logger.info(f"")
         logger.info(f"  REST API (Quick Operations):")
         logger.info(f"    GET  /api/repos - List repositories")
@@ -787,6 +792,13 @@ class BuildEnvironmentServer:
             logger.info("Authentication: Session key required")
             logger.info("  Header: Authorization: Bearer <session-key>")
             logger.info("  Or query param: ?key=<session-key>")
+            logger.info("")
+            logger.warning("=" * 80)
+            logger.warning("Copy-paste this message to AI agents:")
+            logger.warning("")
+            logger.warning(f"Use the MCP build service described at http://{display_host}:{HTTP_PORT}/mcp-build.md")
+            logger.warning(f"Session key: {SESSION_KEY}")
+            logger.warning("=" * 80)
         else:
             logger.warning("Authentication: DISABLED (no session key configured)")
 
@@ -832,14 +844,14 @@ Examples:
   # Start with default stdio transport
   %(prog)s
 
-  # Start with HTTP transport
-  %(prog)s --transport http --host 0.0.0.0 --port 3344
+  # Start with HTTP transport (auto-generates session key)
+  %(prog)s --transport http
 
   # Start with HTTP transport and custom session key
   %(prog)s --transport http --session-key my-secret-key
 
-  # Start with HTTP transport and auto-generated session key
-  %(prog)s --transport http --generate-key
+  # Start with HTTP transport and specify external hostname for display
+  %(prog)s --transport http --external-host example.com
         """
     )
 
@@ -864,6 +876,11 @@ Examples:
     )
 
     parser.add_argument(
+        "--external-host",
+        help="External hostname for documentation URLs (default: auto-detected from system hostname)"
+    )
+
+    parser.add_argument(
         "--session-key",
         help="Session key for HTTP authentication (required for HTTP transport unless --generate-key is used)"
     )
@@ -879,7 +896,7 @@ Examples:
 
 async def main():
     """Main async entry point"""
-    global TRANSPORT_MODE, HTTP_HOST, HTTP_PORT, SESSION_KEY
+    global TRANSPORT_MODE, HTTP_HOST, HTTP_PORT, EXTERNAL_HOST, SESSION_KEY
 
     # Parse command-line arguments
     args = parse_args()
@@ -888,6 +905,16 @@ async def main():
     TRANSPORT_MODE = args.transport.lower()
     HTTP_HOST = args.host
     HTTP_PORT = args.port
+
+    # Set external hostname for display purposes
+    if args.external_host:
+        EXTERNAL_HOST = args.external_host
+    else:
+        # Auto-detect hostname
+        try:
+            EXTERNAL_HOST = socket.gethostname()
+        except Exception:
+            EXTERNAL_HOST = "localhost"
 
     # Handle session key
     if args.session_key:
@@ -899,8 +926,9 @@ async def main():
             logger.warning("=" * 80)
             logger.warning("Generated session key for HTTP transport:")
             logger.warning(f"  {SESSION_KEY}")
+            logger.warning("")
             logger.warning("To reuse this key, start the server with:")
-            logger.warning(f"  {' '.join(['mcp-build-server', '--transport', 'http', '--session-key', SESSION_KEY])}")
+            logger.warning(f"  mcp-build --transport http --session-key {SESSION_KEY}")
             logger.warning("=" * 80)
 
     # Set up signal handlers for immediate shutdown
