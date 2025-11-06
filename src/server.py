@@ -16,7 +16,9 @@ import json
 import logging
 import os
 import secrets
+import signal
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -435,6 +437,28 @@ class BuildEnvironmentServer:
         await server.serve()
 
 
+def setup_signal_handlers():
+    """Set up signal handlers for immediate shutdown"""
+    def signal_handler(signum, frame):
+        """Handle shutdown signals in a signal-safe way"""
+        sig_name = signal.Signals(signum).name
+        # Use os.write for signal-safe output (logger is not signal-safe)
+        msg = f"\nReceived {sig_name}, shutting down...\n".encode('utf-8')
+        os.write(sys.stderr.fileno(), msg)
+
+        # Stop the event loop gracefully instead of forcing sys.exit(0)
+        try:
+            loop = asyncio.get_running_loop()
+            loop.stop()
+        except RuntimeError:
+            # No event loop running, exit immediately
+            sys.exit(0)
+
+    # Register handlers for SIGINT (Ctrl+C) and SIGTERM
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+
 def parse_args():
     """Parse command-line arguments"""
     parser = argparse.ArgumentParser(
@@ -516,14 +540,24 @@ async def main():
             logger.warning(f"  {' '.join(['mcp-build-server', '--transport', 'http', '--session-key', SESSION_KEY])}")
             logger.warning("=" * 80)
 
+    # Set up signal handlers for immediate shutdown
+    setup_signal_handlers()
+
     # Create and run server
     server = BuildEnvironmentServer()
 
-    if TRANSPORT_MODE == "http":
-        await server.run_http()
-    else:
-        # Default to stdio
-        await server.run()
+    try:
+        if TRANSPORT_MODE == "http":
+            await server.run_http()
+        else:
+            # Default to stdio
+            await server.run()
+    except KeyboardInterrupt:
+        # This will be caught if the signal handler doesn't stop the loop first
+        logger.info("\nShutdown complete")
+    except Exception as e:
+        logger.error(f"Server error: {e}", exc_info=True)
+        sys.exit(1)
 
 
 def cli():
