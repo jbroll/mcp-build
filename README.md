@@ -268,6 +268,208 @@ curl "http://localhost:3344/sse?key=YOUR_KEY"
 - Consider VPN or SSH tunneling for remote access
 - Keep your session key secret and rotate it regularly
 
+## Hybrid API Architecture
+
+In addition to the MCP protocol over SSE, the service provides a **Hybrid REST/Streaming API** for more flexible access patterns:
+
+### API Design
+
+- **REST API** for quick, synchronous operations (< 1 second)
+- **Streaming SSE API** for long-running operations with real-time output
+- **MCP Protocol** for backwards compatibility with MCP clients
+
+### Quick Operations (REST API)
+
+These endpoints return immediately with complete results:
+
+#### `GET /api/repos`
+List all discovered repositories.
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" \
+  http://localhost:3344/api/repos
+```
+
+**Response:**
+```json
+{
+  "repos": [
+    {
+      "name": "test-repo",
+      "path": "/path/to/test-repo",
+      "description": "Repository at test-repo",
+      "is_default": true
+    }
+  ]
+}
+```
+
+#### `GET /api/repos/{repo}/env`
+Get environment information for a repository.
+
+**Example:**
+```bash
+curl -H "Authorization: Bearer YOUR_KEY" \
+  http://localhost:3344/api/repos/test-repo/env
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": "=== STDOUT ===\ngcc version 11.4.0\n..."
+}
+```
+
+#### `POST /api/repos/{repo}/ls`
+List directory contents (fast file listing).
+
+**Request Body:**
+```json
+{
+  "args": "-la"
+}
+```
+
+**Example:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"args": "-la"}' \
+  http://localhost:3344/api/repos/test-repo/ls
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": "=== STDOUT ===\ntotal 24\ndrwxr-xr-x 3 user user 4096...\n"
+}
+```
+
+#### `POST /api/repos/{repo}/git/quick`
+Quick git operations (status, branch, log only).
+
+**Request Body:**
+```json
+{
+  "operation": "status",
+  "args": ""
+}
+```
+
+**Example:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"operation": "status", "args": ""}' \
+  http://localhost:3344/api/repos/test-repo/git/quick
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "data": "=== STDOUT ===\nOn branch main\nnothing to commit, working tree clean\n"
+}
+```
+
+### Long Operations (Streaming SSE API)
+
+These endpoints stream output line-by-line as the command executes:
+
+#### `POST /stream/repos/{repo}/make`
+Stream make command output in real-time.
+
+**Request Body:**
+```json
+{
+  "args": "clean all"
+}
+```
+
+**Example:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"args": "test"}' \
+  -N \
+  http://localhost:3344/stream/repos/test-repo/make
+```
+
+**Streaming Response:**
+```
+data: {"type": "stdout", "line": "Starting tests..."}
+
+data: {"type": "stdout", "line": "Running test 1..."}
+
+data: {"type": "stdout", "line": "Running test 2..."}
+
+data: {"type": "stdout", "line": "All tests passed!"}
+
+data: {"type": "complete", "exit_code": 0}
+```
+
+#### `POST /stream/repos/{repo}/git`
+Stream git operations with potentially large output (pull, fetch, diff, show, checkout).
+
+**Request Body:**
+```json
+{
+  "operation": "pull",
+  "args": "origin main"
+}
+```
+
+**Example:**
+```bash
+curl -X POST \
+  -H "Authorization: Bearer YOUR_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"operation": "diff", "args": "HEAD~1"}' \
+  -N \
+  http://localhost:3344/stream/repos/test-repo/git
+```
+
+**Streaming Response:**
+```
+data: {"type": "stdout", "line": "diff --git a/file.txt b/file.txt"}
+
+data: {"type": "stdout", "line": "+Added line"}
+
+data: {"type": "complete", "exit_code": 0}
+```
+
+### Event Types in Streaming Responses
+
+| Type | Description | Fields |
+|------|-------------|--------|
+| `stdout` | Standard output line | `type`, `line` |
+| `stderr` | Standard error line | `type`, `line` |
+| `complete` | Command completed | `type`, `exit_code` |
+| `error` | Error occurred | `type`, `message` |
+
+### When to Use Each API
+
+**Use REST API for:**
+- Repository discovery (`/api/repos`)
+- Quick status checks (`/api/repos/{repo}/git/quick`)
+- Environment queries (`/api/repos/{repo}/env`)
+- Fast file listings (`/api/repos/{repo}/ls`)
+
+**Use Streaming API for:**
+- Long builds (`/stream/repos/{repo}/make`)
+- Large git diffs (`/stream/repos/{repo}/git`)
+- Operations where progress visibility is important
+
+**Use MCP Protocol for:**
+- Integration with MCP-compatible clients (Claude Desktop, etc.)
+- Unified tool interface across different MCP services
+
 ### Example Configuration for Different Setups
 
 **Single Project:**
