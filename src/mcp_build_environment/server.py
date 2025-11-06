@@ -31,8 +31,8 @@ logger = logging.getLogger("mcp-build")
 # Configuration
 ENV_INFO_SCRIPT = Path(__file__).parent / "env_info.sh"
 
-# Base directory for repositories - defaults to parent directory (..)
-REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", "..")).resolve()
+# Base directory for repositories - defaults to current directory
+REPOS_BASE_DIR = Path(os.environ.get("MCP_BUILD_REPOS_DIR", ".")).resolve()
 
 
 class BuildEnvironmentServer:
@@ -62,9 +62,18 @@ class BuildEnvironmentServer:
         self.repos = {}
 
         try:
-            # Scan the base directory for subdirectories containing .git
+            # First, check if the base directory itself is a git repository
+            if (REPOS_BASE_DIR / ".git").exists():
+                repo_name = REPOS_BASE_DIR.name
+                self.repos[repo_name] = {
+                    "path": str(REPOS_BASE_DIR),
+                    "description": f"Repository at {REPOS_BASE_DIR.name}"
+                }
+                self.current_repo = repo_name
+
+            # Also scan for subdirectories containing .git
             for item in REPOS_BASE_DIR.iterdir():
-                if item.is_dir():
+                if item.is_dir() and item != REPOS_BASE_DIR:
                     git_dir = item / ".git"
                     if git_dir.exists():
                         # This is a git repository
@@ -73,7 +82,7 @@ class BuildEnvironmentServer:
                             "path": str(item),
                             "description": f"Repository at {item.relative_to(REPOS_BASE_DIR)}"
                         }
-                        # Set first repo as default if none is set
+                        # Set first repo as default if none is set yet
                         if self.current_repo is None:
                             self.current_repo = repo_name
 
