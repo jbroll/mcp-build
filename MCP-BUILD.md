@@ -1,235 +1,313 @@
-# Using the MCP Build Service
+# MCP Build Service - Agent Guide
 
-This document describes how to use a remote MCP build service instance for building and testing projects.
+This document describes the intended workflow and usage patterns for AI agents working with the MCP Build Service.
 
-> **Note**: This documentation is also available directly from the service at `http://HOST:PORT/mcp-build.md`
+## Overview
 
-## Quick Start
+The MCP Build Service provides a dedicated build environment where you can check out branches, run builds, and execute tests without modifying the user's development workspace. The service is read-only from your perspective - you can read files and execute builds, but all source changes must be made by the user in their development environment.
 
-The MCP build service provides remote access to a build environment where you can:
-- List available repositories
-- Read files from repositories
-- Run builds and tests
-- Execute git operations
-- Inspect the build environment
+## Available Tools
 
-## Service Configuration
+The service exposes these MCP tools (detailed schemas available via protocol discovery):
 
-When connecting to an MCP build service, you need:
-- **Service URL**: The HTTP endpoint (e.g., `http://example.com:3344`)
-- **Session Key**: Authentication token for secure access
+- **list** - Enumerate available repositories
+- **git** - Execute safe git operations (status, log, branch, checkout, pull, fetch, diff, show)
+- **make** - Run make targets (build, test, clean, install, etc.)
+- **ls** - List directory contents and build artifacts
+- **env** - Query installed build tools and their versions
+- **read_file** - Read file contents (with optional line range for large files)
 
-### Fetching This Documentation
+## Core Workflow: Branch Testing
 
-To view this documentation from a running service:
+The intended workflow separates development from testing:
 
-```bash
-curl http://HOST:PORT/mcp-build.md
-```
+### 1. User develops in their workspace
 
-The documentation endpoint is public and does not require authentication.
+The user writes code in their development environment. This is NOT the build service environment.
 
-## Available Operations
-
-### 1. List Repositories
-
-Find what repos are available on the build server:
+### 2. User creates a feature branch and pushes
 
 ```bash
-curl "http://HOST:PORT/api/repos?key=SESSION_KEY"
+# User's workspace
+git checkout -b feature/new-api
+# ... make changes ...
+git commit -m "Add new API endpoint"
+git push origin feature/new-api
 ```
 
-**Response**: JSON list of available repositories with their paths.
+### 3. Agent checks out the branch on build service
 
-### 2. Quick Operations (REST API)
+Use the `git` tool to switch to the user's branch:
 
-Fast operations that complete in under 1 second:
+```python
+# List available repositories
+repos = await call_tool("list", {})
 
-#### Get Environment Info
-```bash
-curl "http://HOST:PORT/api/repos/REPO/env?key=SESSION_KEY"
+# Check current branch
+status = await call_tool("git", {
+    "repo": "my-project",
+    "args": "branch --show-current"
+})
+
+# Fetch latest changes
+await call_tool("git", {
+    "repo": "my-project",
+    "args": "fetch origin"
+})
+
+# Checkout the feature branch
+await call_tool("git", {
+    "repo": "my-project",
+    "args": "checkout feature/new-api"
+})
+
+# Pull to ensure up-to-date
+await call_tool("git", {
+    "repo": "my-project",
+    "args": "pull origin feature/new-api"
+})
 ```
 
-Shows compiler versions, build tools, and system information.
+### 4. Agent runs builds and tests
 
-#### List Files
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"args": "-la"}' \
-  "http://HOST:PORT/api/repos/REPO/ls?key=SESSION_KEY"
+Execute the build process to verify the changes:
+
+```python
+# Clean previous builds
+await call_tool("make", {
+    "repo": "my-project",
+    "args": "clean"
+})
+
+# Build the project
+build_result = await call_tool("make", {
+    "repo": "my-project",
+    "args": "all"
+})
+
+# Run tests
+test_result = await call_tool("make", {
+    "repo": "my-project",
+    "args": "test"
+})
 ```
 
-#### Read File
-```bash
-# Read entire file
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"repo": "REPO", "path": "/absolute/path/to/file.txt"}' \
-  "http://HOST:PORT/api/repos/REPO/read_file?key=SESSION_KEY"
+### 5. Agent inspects results and reports back
 
-# Read specific line range (useful for large files)
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"repo": "REPO", "path": "/absolute/path/to/file.txt", "start_line": 100, "end_line": 200}' \
-  "http://HOST:PORT/api/repos/REPO/read_file?key=SESSION_KEY"
+Check build artifacts and provide feedback:
+
+```python
+# List build artifacts
+artifacts = await call_tool("ls", {
+    "repo": "my-project",
+    "args": "-lh build/"
+})
+
+# Read test output or logs if needed
+test_log = await call_tool("read_file", {
+    "repo": "my-project",
+    "path": "/absolute/path/to/my-project/test/results.log"
+})
+
+# Check git diff to understand changes
+diff = await call_tool("git", {
+    "repo": "my-project",
+    "args": "diff main..feature/new-api"
+})
 ```
 
-**Note**: The path must be absolute and within the repository directory. Line numbers are 1-indexed.
+Report findings to the user, including:
+- Build success/failure
+- Test results
+- Any warnings or errors
+- Build artifact details
 
-#### Git Status/Branch/Log (Quick)
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"operation": "status", "args": ""}' \
-  "http://HOST:PORT/api/repos/REPO/git/quick?key=SESSION_KEY"
+### 6. User iterates based on feedback
+
+If issues are found, the user fixes them in their workspace, commits, and pushes. Return to step 3.
+
+## Best Practices
+
+### Always check repository availability first
+
+Before operating on a repository, verify it exists:
+
+```python
+repos = await call_tool("list", {})
+if "my-project" not in [r["name"] for r in repos["repos"]]:
+    # Handle missing repo
 ```
 
-**Allowed operations**: `status`, `branch`, `log`
+### Use explicit branch operations
 
-### 3. Long Operations (Streaming API)
+Don't assume you're on the right branch. Always:
+1. Fetch to get latest remote state
+2. Checkout the specific branch
+3. Pull to ensure up-to-date
 
-For operations that take time and produce output, use streaming endpoints:
+### Read files efficiently
 
-#### Stream Build Output
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"args": "clean all"}' \
-  -N \
-  "http://HOST:PORT/stream/repos/REPO/make?key=SESSION_KEY"
+For large files, use line ranges:
+
+```python
+# Read specific sections
+section = await call_tool("read_file", {
+    "repo": "my-project",
+    "path": "/absolute/path/to/large-file.cpp",
+    "start_line": 100,
+    "end_line": 200
+})
 ```
 
-**Use for**: `make` with any targets (build, test, clean, install, etc.)
+### Check environment before diagnosing build failures
 
-#### Stream Git Operations
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -d '{"operation": "pull", "args": "origin main"}' \
-  -N \
-  "http://HOST:PORT/stream/repos/REPO/git?key=SESSION_KEY"
+If builds fail, check what tools are available:
+
+```python
+env_info = await call_tool("env", {
+    "repo": "my-project"
+})
 ```
 
-**Allowed operations**: `pull`, `fetch`, `diff`, `show`, `checkout`
+This shows compiler versions, make version, and other installed tools that may affect the build.
 
-### 4. Streaming Response Format
+### Parse build output carefully
 
-Streaming endpoints return Server-Sent Events (SSE):
+Build and test output appears in the tool results. Look for:
+- Exit codes (non-zero = failure)
+- Error messages (often in stderr)
+- Warning counts
+- Test statistics (passed/failed/skipped)
 
-```
-data: {"type": "stdout", "line": "Compiling file.cpp..."}
-data: {"type": "stderr", "line": "Warning: unused variable"}
-data: {"type": "complete", "exit_code": 0}
-```
+### Handle large diffs intelligently
 
-**Event types**:
-- `stdout` - Standard output line
-- `stderr` - Standard error line
-- `complete` - Command finished (includes `exit_code`)
-- `error` - Error occurred (includes `message`)
+When reviewing changes between branches, diffs can be large. Consider:
+- Using `git log` first to understand commit history
+- Checking `git diff --stat` for a summary before full diff
+- Reading specific files that changed rather than full diffs
 
-## Common Workflows
+## Common Patterns
 
-### Building a Project
+### Verify a pushed branch
 
-```bash
-# 1. Check what repos are available
-curl "http://HOST:PORT/api/repos?key=KEY"
+```python
+# User: "I just pushed feature-xyz, can you verify it builds?"
 
-# 2. Check git status
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"operation": "status", "args": ""}' \
-  "http://HOST:PORT/api/repos/myproject/git/quick?key=KEY"
+# 1. List repos to confirm access
+repos = await call_tool("list", {})
 
-# 3. Clean and build
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"args": "clean all"}' -N \
-  "http://HOST:PORT/stream/repos/myproject/make?key=KEY"
+# 2. Fetch latest
+await call_tool("git", {"repo": "project", "args": "fetch origin"})
 
-# 4. Run tests
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"args": "test"}' -N \
-  "http://HOST:PORT/stream/repos/myproject/make?key=KEY"
-```
+# 3. Checkout branch
+await call_tool("git", {"repo": "project", "args": "checkout feature-xyz"})
 
-### Debugging Build Failures
+# 4. Pull to ensure up-to-date
+await call_tool("git", {"repo": "project", "args": "pull"})
 
-```bash
-# 1. Check environment
-curl "http://HOST:PORT/api/repos/myproject/env?key=KEY"
+# 5. Build
+result = await call_tool("make", {"repo": "project", "args": "all"})
 
-# 2. List build artifacts
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"args": "-lh build/"}' \
-  "http://HOST:PORT/api/repos/myproject/ls?key=KEY"
+# 6. Test
+test_result = await call_tool("make", {"repo": "project", "args": "test"})
 
-# 3. Check recent commits
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"operation": "log", "args": "--oneline -10"}' \
-  "http://HOST:PORT/api/repos/myproject/git/quick?key=KEY"
-
-# 4. View changes
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"operation": "diff", "args": "HEAD~1"}' -N \
-  "http://HOST:PORT/stream/repos/myproject/git?key=KEY"
+# 7. Report findings
 ```
 
-### Switching Branches
+### Compare branches
 
-```bash
-# 1. View branches
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"operation": "branch", "args": "-a"}' \
-  "http://HOST:PORT/api/repos/myproject/git/quick?key=KEY"
+```python
+# User: "What changed between main and my feature branch?"
 
-# 2. Checkout branch (streaming - may take time)
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"operation": "checkout", "args": "feature-branch"}' -N \
-  "http://HOST:PORT/stream/repos/myproject/git?key=KEY"
+# 1. Ensure both branches are up-to-date
+await call_tool("git", {"repo": "project", "args": "fetch origin"})
 
-# 3. Pull latest
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"operation": "pull", "args": ""}' -N \
-  "http://HOST:PORT/stream/repos/myproject/git?key=KEY"
+# 2. Get commit history
+log = await call_tool("git", {
+    "repo": "project",
+    "args": "log --oneline main..feature-branch"
+})
+
+# 3. Get diff summary
+stat = await call_tool("git", {
+    "repo": "project",
+    "args": "diff --stat main..feature-branch"
+})
+
+# 4. Get full diff if needed
+diff = await call_tool("git", {
+    "repo": "project",
+    "args": "diff main..feature-branch"
+})
 ```
 
-## Tips for AI Agents
+### Debug build failure
 
-1. **Always check available repos first** - Repository names must match exactly
-2. **Use REST API for quick checks** - Faster than streaming for status/env queries
-3. **Use streaming for builds** - Real-time feedback on long operations
-4. **Parse SSE streams** - Look for `exit_code` in completion events
-5. **Check exit codes** - Non-zero means failure
-6. **Read stderr carefully** - Contains compilation errors and warnings
+```python
+# User: "The build is failing on my branch"
+
+# 1. Checkout the branch
+await call_tool("git", {"repo": "project", "args": "checkout failing-branch"})
+await call_tool("git", {"repo": "project", "args": "pull"})
+
+# 2. Check environment
+env = await call_tool("env", {"repo": "project"})
+
+# 3. Try building with verbose output
+result = await call_tool("make", {"repo": "project", "args": "clean all"})
+
+# 4. Read relevant source files if needed
+if "undefined reference" in result:
+    # Read the file mentioned in error
+    source = await call_tool("read_file", {
+        "repo": "project",
+        "path": "/absolute/path/to/problematic/file.cpp"
+    })
+
+# 5. Check git log for recent changes
+recent = await call_tool("git", {
+    "repo": "project",
+    "args": "log --oneline -10"
+})
+
+# 6. Provide analysis and suggestions
+```
+
+## What NOT to do
+
+**Don't try to modify source files** - You have read-only access. Suggest changes to the user instead.
+
+**Don't assume branch state** - Always explicitly checkout and pull the branch you want to test.
+
+**Don't run destructive commands** - The service blocks them, but don't attempt `git reset --hard`, `rm -rf`, etc.
+
+**Don't use relative paths for read_file** - Always use absolute paths within the repository.
+
+**Don't bypass the workflow** - The separation between development (user) and testing (agent) is intentional.
+
+## Tips for Effective Usage
+
+1. **Be proactive about branch management** - Fetch and pull frequently to stay synchronized
+2. **Read selectively** - Use line ranges for large files to reduce data transfer
+3. **Interpret build output** - Don't just report pass/fail, explain what the errors mean
+4. **Suggest specific fixes** - Based on build errors, provide actionable suggestions to the user
+5. **Track multiple repos** - If a project spans multiple repos, coordinate branch checkouts across them
+6. **Use git history** - Understanding recent commits helps diagnose issues
 
 ## Security Notes
 
-- Keep session keys secret
-- Operations are limited to safe commands (no `rm -rf`, etc.)
-- Git operations restricted to read-only or safe operations
-- Path traversal is blocked
+- All git operations are restricted to safe commands (no force-push, reset --hard, etc.)
+- No arbitrary command execution is allowed
+- Path traversal attempts are blocked
+- You cannot write files or modify the repository
+- All operations are logged for audit purposes
 
-## Troubleshooting
+## Getting Help
 
-**"Repository not found"**: Use exact name from `/api/repos` list
+If the MCP Build Service is not available or not responding:
+1. Ask the user to verify the service is running
+2. Check if the repository exists in the configured directory
+3. Confirm the MCP client configuration is correct
+4. Verify network connectivity for remote HTTP mode
 
-**"Unauthorized"**: Check session key is correct and included in request
-
-**Build fails**: Check environment with `/api/repos/REPO/env` to verify tools are available
-
-**Connection timeout**: Streaming operations may take time - increase client timeout
-
-## API Reference Summary
-
-| Endpoint | Method | Purpose | Speed |
-|----------|--------|---------|-------|
-| `/api/repos` | GET | List repositories | Fast |
-| `/api/repos/{repo}/env` | GET | Environment info | Fast |
-| `/api/repos/{repo}/ls` | POST | List files | Fast |
-| `/api/repos/{repo}/read_file` | POST | Read file contents | Fast |
-| `/api/repos/{repo}/git/quick` | POST | Quick git ops | Fast |
-| `/stream/repos/{repo}/make` | POST | Build/test | Streaming |
-| `/stream/repos/{repo}/git` | POST | Git operations | Streaming |
-
-For complete details, see the [full README](README.md) in the mcp-build repository.
+For detailed API specifications, use the MCP protocol's tool discovery mechanisms rather than relying solely on this document.
