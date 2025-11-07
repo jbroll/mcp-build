@@ -10,7 +10,7 @@ build:
 
 	# Install Python dependencies to build/lib
 	pip install --target build/lib -r requirements.txt
-	pip install --target build/lib starlette uvicorn
+	pip install --target build/lib starlette uvicorn pyarrow pytest
 
 	# Copy source files (Python modules and scripts)
 	cp -r src/* build/lib/

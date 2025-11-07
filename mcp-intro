@@ -8,6 +8,4 @@ if [ -z "$KEY" ]; then
     exit 1
 fi
 
-echo "Session Key: ${KEY}"
-echo ""
-echo " READ this document to understand how to connect & use it: https://symon.rkroll.com:3344/mcp-build.md?key=${KEY}"
+echo "Session Key: ${KEY}" | tee /dev/tty | clipper

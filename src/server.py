@@ -128,12 +128,14 @@ def verify_session_key(request: Request) -> bool:
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]  # Remove "Bearer " prefix
+        logger.info(f"Try Key: {token} : {SESSION_KEY}")
         if secrets.compare_digest(token, SESSION_KEY):
             return True
 
     # Check query parameter
-    query_key = request.query_params.get("key", "")
-    if query_key and secrets.compare_digest(query_key, SESSION_KEY):
+    token = request.query_params.get("key", "")
+    logger.info(f"Try Key: {token} : {SESSION_KEY}")
+    if token and secrets.compare_digest(token, SESSION_KEY):
         return True
 
     return False
@@ -227,7 +229,7 @@ class BuildEnvironmentServer:
             Tool(
                 name="git",
                 description="Run git commands in a repository. "
-                           "Limited to safe operations: status, log, checkout, pull, branch, diff, fetch, show",
+                           "Limited to safe operations: status, log, checkout, pull, branch, diff, fetch, reset, show",
                 inputSchema={
                     "type": "object",
                     "properties": {

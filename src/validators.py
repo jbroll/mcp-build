@@ -12,7 +12,7 @@ from pathlib import Path
 
 # Allowed git subcommands
 ALLOWED_GIT_COMMANDS = {
-    "status", "log", "checkout", "pull", "branch", "diff", "fetch", "show"
+    "status", "log", "checkout", "pull", "branch", "diff", "fetch", "reset", "show"
 }
 
 # Dangerous patterns to block
@@ -134,7 +134,7 @@ def validate_make_args(args: str) -> None:
 
     # Make arguments should be targets or variable assignments
     # Allow: alphanumeric, underscore, hyphen, equals, space, slash (for paths), quotes (for values with spaces)
-    if not re.match(r'^[a-zA-Z0-9_\-=\s/\.\'"]+$', args):
+    if not re.match(r'^[\*a-zA-Z0-9_\-=\s/\.\'"]+$', args):
         raise ValueError(f"Make arguments contain invalid characters: {args}")
 
 
