@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fetch MCP Build session key and print introduction for AI Actors
+# Fetch MCP Build session key and print documentation URL for AI Actors
 
 KEY=$(ssh john@symon.rkroll.com 'cat ~/.mcp-build-key' 2>/dev/null)
 
@@ -8,7 +8,5 @@ if [ -z "$KEY" ]; then
     exit 1
 fi
 
-cat <<EOF
-I have access to an MCP Build Service at https://symon.rkroll.com:3344/sse?key=${KEY}
-Please read https://symon.rkroll.com:3344/mcp-build.md for usage instructions and workflow patterns.
-EOF
+echo "You have a build and test environment:"
+echo " READ this document to understand how to connect use it: read https://symon.rkroll.com:3344/mcp-build.md?key=${KEY}"

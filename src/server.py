@@ -907,8 +907,12 @@ class BuildEnvironmentServer:
             return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
     async def serve_documentation(self, request: Request):
-        """GET /mcp-build.md - Serve the MCP-BUILD.md documentation"""
-        # Documentation endpoint is public - no authentication required
+        """GET /mcp-build.md?key=SESSION_KEY - Serve dynamically generated documentation"""
+        # Documentation endpoint requires authentication
+        if not verify_session_key(request):
+            logger.warning(f"Unauthorized documentation access attempt from {request.client.host}")
+            return PlainTextResponse("Unauthorized", status_code=403)
+
         try:
             doc_path = Path(__file__).parent / "MCP-BUILD.md"
             if not doc_path.exists():
@@ -917,12 +921,50 @@ class BuildEnvironmentServer:
                     status_code=404
                 )
 
+            # Read base documentation
             content = doc_path.read_text()
+
+            # Extract session key from request
+            session_key = request.query_params.get("key", "")
+            if not session_key and self.session_key:
+                # Fall back to session_key from self if not in query params
+                session_key = self.session_key
+
+            # Construct SSE endpoint URL dynamically
+            # Use HTTPS scheme (service is always deployed behind HTTPS proxy)
+            host = request.headers.get("host", f"{request.url.hostname}:{request.url.port}")
+            sse_endpoint = f"https://{host}/sse?key={session_key}"
+
+            # Inject connection information at the top of the document
+            connection_header = f"""# MCP Build Service
+
+**Connect to this service:** `{sse_endpoint}`
+
+---
+
+"""
+
+            # Replace the first heading with our dynamic version
+            # Find the first line starting with "# " and replace it with our header
+            lines = content.split('\n')
+            new_lines = []
+            header_replaced = False
+
+            for line in lines:
+                if not header_replaced and line.startswith('# '):
+                    # Skip the original title, we'll use our dynamic header
+                    new_lines.append(connection_header.rstrip())
+                    header_replaced = True
+                else:
+                    new_lines.append(line)
+
+            dynamic_content = '\n'.join(new_lines)
+
             return PlainTextResponse(
-                content,
+                dynamic_content,
                 media_type="text/markdown",
                 headers={
-                    "Cache-Control": "public, max-age=300",  # Cache for 5 minutes
+                    "Cache-Control": "private, no-cache",  # Don't cache personalized content
                 }
             )
         except Exception as e:
