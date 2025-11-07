@@ -1,301 +1,198 @@
 # MCP Build Service
 
-A secure build and test environment that AI assistants can access remotely. This service allows AI agents like Claude to execute builds, run tests, and manage git operations on your repositories without direct file system access.
+A Model Context Protocol (MCP) server that provides access to git repositories for build and test operations. This allows AI assistants to run builds, execute tests, and inspect git repositories on your behalf.
 
-## What is this?
+## What does it do?
 
-MCP Build Service is a [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that provides AI assistants with controlled access to software build operations. Instead of giving an AI direct access to your file system, you provide access to a safe, sandboxed build environment where it can:
+This service provides AI assistants with tools to:
 
-- Check out different git branches
-- Run builds and tests
-- Inspect build artifacts and test results
-- Read files and check git status
-- All without write access to your source code
+- List available git repositories
+- Execute git commands (status, log, checkout, pull, fetch, diff, show, branch)
+- Run make targets (build, test, clean, etc.)
+- List directory contents
+- Read files from repositories
+- Query installed build tools and versions
 
-## Why use it?
+The service runs in a directory containing git repositories and exposes them through the MCP protocol.
 
-**Separation of concerns**: Your main development environment stays untouched while the AI works in a dedicated build environment.
+## Use case
 
-**Safety**: The service only allows safe operations - no destructive commands, no arbitrary code execution, just builds and tests.
+The typical workflow is:
 
-**Remote builds**: Perfect for CI/CD integration, container-based builds, or accessing powerful build machines remotely.
+1. You develop code in your workspace and push to a git branch
+2. AI assistant uses this service to checkout your branch in a build environment
+3. AI assistant runs builds and tests on that branch
+4. AI assistant reports results back to you
+5. You make fixes based on feedback and repeat
 
-**Multi-repository support**: Work with multiple projects from a single service instance.
+This separates your development environment from the build/test environment that the AI uses.
 
-## Quick Start
-
-### Installation
+## Installation
 
 ```bash
-# Clone and install
 git clone <this-repo-url>
 cd mcp-build
 pip install -e .
 ```
 
-### Set up your build environment
+## Setup
 
-Place your git repositories in a directory where you want builds to happen:
+Create or designate a directory containing your git repositories:
 
 ```bash
-# Example structure
-/home/builder/repos/
-├── my-app/           # git repository
-├── my-library/       # git repository
-└── another-project/  # git repository
+/path/to/build-area/
+├── project-one/    # git repository
+├── project-two/    # git repository
+└── project-three/  # git repository
 ```
 
-### Start the service
+## Usage
 
-**For local use with Claude Desktop:**
+### Local mode (stdio)
+
+Start the service in the directory containing your repositories:
 
 ```bash
-cd /home/builder/repos
+cd /path/to/build-area
 mcp-build
 ```
 
-**For remote access:**
+Configure Claude Desktop to use it. Add to your Claude Desktop config file:
+
+**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "build": {
+      "command": "mcp-build",
+      "cwd": "/path/to/build-area"
+    }
+  }
+}
+```
+
+### Remote mode (HTTP)
+
+Start with HTTP transport:
 
 ```bash
-cd /home/builder/repos
+cd /path/to/build-area
 mcp-build --transport http --host 0.0.0.0 --port 3344
 ```
 
-The service will display a session key - save this for authentication.
-
-### Configure your AI assistant
-
-**Claude Desktop (local stdio):**
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+The service generates a session key on startup. Configure Claude Desktop with:
 
 ```json
 {
   "mcpServers": {
     "build": {
-      "command": "mcp-build",
-      "cwd": "/home/builder/repos"
+      "url": "http://your-server:3344/sse?key=SESSION_KEY"
     }
   }
 }
 ```
 
-**Claude Desktop (remote HTTP):**
-
-```json
-{
-  "mcpServers": {
-    "build": {
-      "url": "http://your-build-server:3344/sse?key=YOUR_SESSION_KEY"
-    }
-  }
-}
-```
-
-Restart Claude Desktop, and your AI assistant will now have access to the build service.
-
-## Using with an AI Assistant
-
-Once configured, you can ask your AI assistant to:
-
-**Check what repositories are available:**
-> "List the available repositories on the build server"
-
-**Run builds and tests:**
-> "Checkout the feature-123 branch in my-app and run the tests"
-
-**Debug build failures:**
-> "The tests are failing - can you check the build output and see what's wrong?"
-
-**Verify changes:**
-> "I just pushed some changes to the api-refactor branch. Can you build it and make sure all tests pass?"
-
-**Compare branches:**
-> "Show me the diff between main and feature-123 in my-app"
-
-The AI will use the build service automatically through the MCP protocol.
-
-## How it works
-
-1. **You write code** in your development environment
-2. **You commit and push** to a branch in git
-3. **AI checks out the branch** on the build service
-4. **AI runs builds/tests** and reports results
-5. **You review and iterate** based on feedback
-
-Your source files are never modified by the AI - it only reads and builds.
-
-## Available Tools
-
-The service provides these operations (used automatically by the AI):
-
-- **list** - Discover available repositories
-- **git** - Safe git operations (status, log, checkout, pull, fetch, diff, show, branch)
-- **make** - Run make targets (build, test, clean, etc.)
-- **ls** - List files and directories
-- **env** - Check installed build tools and versions
-- **read_file** - Read file contents from repositories
-
-## Command-Line Options
+## Command-line options
 
 ```bash
-# Show all options
-mcp-build --help
-
-# Local stdio mode (default)
-mcp-build
-
-# HTTP mode with auto-generated session key
-mcp-build --transport http
-
-# HTTP mode with custom session key
+mcp-build --help                  # Show all options
+mcp-build                         # stdio mode (default)
+mcp-build --transport http        # HTTP mode, auto-generate session key
 mcp-build --transport http --session-key YOUR_KEY
-
-# Custom host and port
 mcp-build --transport http --host 0.0.0.0 --port 8080
 ```
 
-## Security
+## Available tools
 
-The service implements multiple security layers:
+The service exposes these MCP tools:
 
-**Command validation:**
-- Blocks dangerous operations (rm, dd, format, etc.)
-- Prevents path traversal attempts
-- Restricts git to safe operations only
-- No arbitrary command execution
+- **list** - List available repositories
+- **git** - Execute git commands (limited to: status, log, checkout, pull, branch, diff, fetch, show)
+- **make** - Run make with specified arguments (executes whatever is in the Makefile)
+- **ls** - List files and directories
+- **env** - Show installed tools and versions
+- **read_file** - Read file contents (with optional line range for large files)
 
-**Authentication (HTTP mode):**
-- Session key required for all requests
-- Constant-time comparison prevents timing attacks
-- Keys can be auto-generated or provided
+## Security considerations
 
-**Best practices:**
-- Use stdio transport for local, trusted scenarios
-- Use HTTP transport with TLS/reverse proxy for remote access
-- Restrict network access with firewalls
-- Rotate session keys regularly
-- Don't expose to untrusted networks
+**Git operations:** The service restricts git commands to a whitelist (status, log, checkout, pull, branch, diff, fetch, show). Dangerous operations like `git push --force` or `git reset --hard` are blocked.
+
+**Command validation:** The service blocks path traversal patterns (`../`) and some command injection patterns (pipes, redirects, command substitution).
+
+**Make targets:** The service runs whatever make targets you specify. These execute the commands defined in the repository's Makefile, which could be anything. The service does not sandbox or restrict what Makefiles can do.
+
+**Authentication (HTTP mode):** Requires a session key passed as a Bearer token or query parameter. Keys can be auto-generated or provided.
+
+**Recommendation:** Run this service in an environment appropriate for build operations (e.g., a dedicated build VM, container, or CI environment). It validates some inputs but does not provide comprehensive sandboxing.
+
+## Example usage with AI assistant
+
+Once configured, you can ask your AI assistant:
+
+- "List the available repositories"
+- "Checkout the feature-branch in my-project and run make test"
+- "What's the build output from the latest commit on main?"
+- "Show me the diff between main and feature-branch"
+
+The AI will use the service automatically through MCP tool calls.
 
 ## Troubleshooting
 
-**AI says "no repositories found":**
-- Make sure you started mcp-build in the parent directory of your repos
-- Verify each repository has a `.git` directory
-- Restart Claude Desktop after configuration changes
+**No repositories found**
+- Verify you started mcp-build in the parent directory of your git repos
+- Check each directory has a `.git` subdirectory
 
-**"Repository not found" errors:**
+**Repository not found**
 - Repository names must match directory names exactly
-- Use the `list` tool to see available names
+- Use the list tool to see available names
 
-**Build tools not found:**
-- Run `mcp-build` and ask the AI to check the environment
-- Install missing tools (gcc, make, cmake, etc.) on the build machine
+**Build failures**
+- Use the env tool to check installed build tools
+- Verify the Makefile exists and has the target you're trying to run
 
-**Permission denied:**
-- Ensure the user running mcp-build has read/execute access to repositories
-- Check file permissions: `ls -la /home/builder/repos`
+**Connection issues (HTTP mode)**
+- Check the session key matches what the service printed at startup
+- Verify firewall allows the port
+- Test with curl: `curl -H "Authorization: Bearer KEY" http://host:port/api/repos`
 
-**Connection issues (HTTP mode):**
-- Verify the session key is correct
-- Check firewall rules allow the port
-- Test with curl: `curl -H "Authorization: Bearer KEY" http://host:3344/api/repos`
+## HTTP API
 
-## Advanced Configuration
+In addition to the MCP protocol, the service provides HTTP endpoints:
 
-### Multiple Project Directories
+**Quick operations (REST):**
+- `GET /api/repos` - List repositories
+- `GET /api/repos/{repo}/env` - Environment info
+- `POST /api/repos/{repo}/ls` - List files
+- `POST /api/repos/{repo}/read_file` - Read file contents
+- `POST /api/repos/{repo}/git/quick` - Quick git operations (status, branch, log)
 
-You can run multiple service instances for different project groups:
+**Long operations (streaming SSE):**
+- `POST /stream/repos/{repo}/make` - Stream build output
+- `POST /stream/repos/{repo}/git` - Stream git operations (pull, fetch, diff, show, checkout)
 
-```json
-{
-  "mcpServers": {
-    "build-frontend": {
-      "command": "mcp-build",
-      "cwd": "/home/builder/frontend-projects"
-    },
-    "build-backend": {
-      "command": "mcp-build",
-      "cwd": "/home/builder/backend-projects"
-    }
-  }
-}
-```
-
-### Docker/Container Setup
-
-```bash
-# Run in a container for isolation
-docker run -v /host/repos:/repos -w /repos -p 3344:3344 \
-  mcp-build-image mcp-build --transport http --host 0.0.0.0
-```
-
-### Reverse Proxy for TLS
-
-Use nginx or caddy to add HTTPS:
-
-```nginx
-server {
-    listen 443 ssl;
-    server_name build.example.com;
-
-    ssl_certificate /path/to/cert.pem;
-    ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://localhost:3344;
-        proxy_set_header Connection '';
-        proxy_http_version 1.1;
-        chunked_transfer_encoding off;
-    }
-}
-```
-
-## API Access
-
-While the MCP protocol is the primary interface, the service also provides REST and streaming APIs for direct integration:
-
-**REST API** - Quick operations (list repos, get status, read files)
-**Streaming API** - Long operations with real-time output (builds, tests)
-
-See [MCP-BUILD.md](MCP-BUILD.md) for API details.
+All endpoints require authentication via session key.
 
 ## Development
 
-### Project Structure
-
-```
-mcp-build/
-├── src/
-│   ├── server.py         # Main MCP server
-│   ├── validators.py     # Security validation
-│   └── helpers/          # Helper modules
-├── tests/                # Test suite
-├── README.md            # This file (user docs)
-└── MCP-BUILD.md         # Agent workflow docs
-```
-
-### Running Tests
-
+Run tests:
 ```bash
 pip install -e ".[dev]"
 pytest tests/
 ```
 
-### Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new features
-4. Submit a pull request
+Project structure:
+```
+mcp-build/
+├── src/
+│   ├── server.py       # Main server
+│   └── validators.py   # Input validation
+├── tests/              # Tests
+├── README.md          # This file (user docs)
+└── MCP-BUILD.md       # Agent usage guide
+```
 
 ## License
 
-MIT License - see LICENSE file for details.
-
-## Support
-
-- [Open an issue](https://github.com/your-org/mcp-build/issues) for bug reports
-- [MCP Documentation](https://modelcontextprotocol.io) for protocol details
-- [Claude Code Documentation](https://docs.claude.com) for AI integration help
+MIT License
