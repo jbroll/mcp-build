@@ -10,6 +10,25 @@ The testing infrastructure includes:
 - **Manual Testing Tools**: Interactive debugging scripts
 - **Protocol Debugging**: Low-level protocol testing utilities
 
+## Setup
+
+### Install Test Dependencies
+
+```bash
+# Option 1: Install in development mode with all dev dependencies
+pip install -e ".[dev]"
+
+# Option 2: Use a virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Required test dependencies (automatically installed with `[dev]`):
+- `pytest` - Test framework
+- `pytest-asyncio` - Async test support
+- `httpx` - HTTP client for API tests
+
 ## Quick Start
 
 ### Running All Tests
@@ -23,6 +42,9 @@ pytest tests/test_integration.py -v -s
 
 # Run specific test
 pytest tests/test_integration.py::test_git_status -v
+
+# Run key file persistence tests
+pytest tests/test_key_file.py -v
 ```
 
 ### Manual Interactive Testing
@@ -48,6 +70,35 @@ python tests/debug_protocol.py
 ```
 
 ## Test Files
+
+### `test_key_file.py`
+
+Session key file persistence tests covering:
+
+1. **Key Generation**
+   - Auto-generates key on first run when file doesn't exist
+   - Saves key to specified file with secure permissions (600)
+   - Validates key format and length
+
+2. **Key Persistence**
+   - Loads existing key from file on subsequent server starts
+   - Maintains same key across service restarts
+   - Only rewrites file if key changed (preserves mtime)
+
+3. **Key Override**
+   - Explicit `--session-key` argument takes priority over file
+   - Updates file with explicit key when provided
+   - Verifies correct authentication behavior
+
+4. **Key Rotation**
+   - Deleting key file triggers new key generation
+   - New key is different from original
+   - Old key no longer works after rotation
+
+**Running key file tests:**
+```bash
+pytest tests/test_key_file.py -v
+```
 
 ### `test_integration.py`
 

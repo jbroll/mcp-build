@@ -1079,6 +1079,14 @@ Examples:
 
   # Combine: use public IP detection with custom session key
   %(prog)s --transport http --detect-public-ip --session-key my-key
+
+  # Use persistent session key with file-based storage
+  # First run: generates and saves key to file
+  # Subsequent runs: loads existing key from file
+  %(prog)s --transport http --key-file ~/.mcp-build-key
+
+  # Override with specific session key (and save to file)
+  %(prog)s --transport http --session-key my-secret --key-file ~/.mcp-build-key
         """
     )
 
@@ -1115,13 +1123,18 @@ Examples:
 
     parser.add_argument(
         "--session-key",
-        help="Session key for HTTP authentication (required for HTTP transport unless --generate-key is used)"
+        help="Session key for HTTP authentication (overrides key from --key-file if both provided)"
     )
 
     parser.add_argument(
         "--generate-key",
         action="store_true",
         help="Auto-generate a random session key for HTTP transport"
+    )
+
+    parser.add_argument(
+        "--key-file",
+        help="File path for persistent session key storage (reads existing key or generates new one)"
     )
 
     return parser.parse_args()
@@ -1158,20 +1171,70 @@ async def main():
         except Exception:
             EXTERNAL_HOST = "localhost"
 
-    # Handle session key
+    # Handle session key with file-based persistence
+    import os
+    key_from_file = None
+
+    # Try to read existing key from file if --key-file is provided
+    if args.key_file:
+        key_path = os.path.expanduser(args.key_file)
+        if os.path.exists(key_path):
+            try:
+                with open(key_path, 'r') as f:
+                    key_from_file = f.read().strip()
+                if key_from_file:
+                    logger.info(f"Loaded existing session key from: {key_path}")
+            except Exception as e:
+                logger.warning(f"Failed to read session key from {key_path}: {e}")
+                key_from_file = None
+
+    # Determine session key (priority: explicit arg > file > generate)
     if args.session_key:
+        # Explicit session key takes highest priority
         SESSION_KEY = args.session_key
+        logger.info("Using session key from command-line argument")
+    elif key_from_file:
+        # Use existing key from file
+        SESSION_KEY = key_from_file
     elif args.generate_key or TRANSPORT_MODE == "http":
-        # Generate a random session key if not provided and in HTTP mode
-        if TRANSPORT_MODE == "http" and not args.session_key:
+        # Generate a new key if in HTTP mode and no key provided
+        if TRANSPORT_MODE == "http":
             SESSION_KEY = secrets.token_urlsafe(32)
             logger.warning("=" * 80)
-            logger.warning("Generated session key for HTTP transport:")
+            logger.warning("Generated NEW session key for HTTP transport:")
             logger.warning(f"  {SESSION_KEY}")
             logger.warning("")
-            logger.warning("To reuse this key, start the server with:")
-            logger.warning(f"  mcp-build --transport http --session-key {SESSION_KEY}")
+            if args.key_file:
+                logger.warning(f"Key will be persisted to: {args.key_file}")
+            else:
+                logger.warning("To reuse this key, start the server with:")
+                logger.warning(f"  mcp-build --transport http --session-key {SESSION_KEY}")
             logger.warning("=" * 80)
+
+    # Write session key to file if requested (whether read, provided, or generated)
+    if args.key_file and SESSION_KEY:
+        try:
+            key_path = os.path.expanduser(args.key_file)
+
+            # Only write if key changed or file doesn't exist
+            should_write = True
+            if os.path.exists(key_path):
+                try:
+                    with open(key_path, 'r') as f:
+                        existing_key = f.read().strip()
+                    if existing_key == SESSION_KEY:
+                        should_write = False  # Key unchanged, no need to write
+                except Exception:
+                    pass  # Write anyway if we can't read
+
+            if should_write:
+                with open(key_path, 'w') as f:
+                    f.write(SESSION_KEY)
+                os.chmod(key_path, 0o600)  # Set to user-read-write only
+                logger.info(f"Session key written to: {key_path}")
+        except Exception as e:
+            logger.error(f"Failed to write session key to {args.key_file}: {e}")
+            sys.exit(1)
 
     # Set up signal handlers for immediate shutdown
     setup_signal_handlers()
