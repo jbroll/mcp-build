@@ -1,313 +1,149 @@
-# MCP Build Service - Agent Guide
+# MCP Build Service
 
-This document describes the intended workflow and usage patterns for AI agents working with the MCP Build Service.
+This is a standard MCP server providing isolated build and test environments for software development workflows.
 
-## Overview
+## Purpose
 
-The MCP Build Service provides a dedicated build environment where you can check out branches, run builds, and execute tests without modifying the user's development workspace. The service is read-only from your perspective - you can read files and execute builds, but all source changes must be made by the user in their development environment.
+The MCP Build Service provides a dedicated build environment separate from your development workspace. You can check out branches, run builds, and execute tests without modifying the user's working directory. All operations are read-only from the agent perspective - you can read files and execute builds, but cannot modify source code.
 
-## Available Tools
+## Service Model: Development/Test Separation
 
-The service exposes these MCP tools (detailed schemas available via protocol discovery):
+This service implements a clear separation between development and testing:
 
-- **list** - Enumerate available repositories
-- **git** - Execute safe git operations (status, log, branch, checkout, pull, fetch, diff, show)
-- **make** - Run make targets (build, test, clean, install, etc.)
-- **ls** - List directory contents and build artifacts
-- **env** - Query installed build tools and their versions
-- **read_file** - Read file contents (with optional line range for large files)
+- **Development (User)**: User writes code, commits changes, pushes branches to remote
+- **Testing (Agent)**: Agent fetches branches in isolated environment, runs builds/tests, reports results
+- **Iteration**: User fixes issues based on agent feedback, pushes again
 
-## Core Workflow: Branch Testing
+This separation ensures the user's development workspace remains under their control while agents can validate changes in a clean, reproducible environment.
 
-The intended workflow separates development from testing:
+## Available Operations
 
-### 1. User develops in their workspace
+All operations follow standard MCP tool protocol. Use MCP discovery (`tools/list`) for complete schemas and parameter details.
 
-The user writes code in their development environment. This is NOT the build service environment.
+**Core capabilities:**
+- **Repository enumeration** - List available repositories
+- **Git operations** - Safe subset: status, log, diff, show, branch, checkout, fetch, pull
+- **Build execution** - Run make targets (build, test, clean, install, etc.)
+- **File reading** - Read file contents with optional line range for large files
+- **Directory listing** - List directory contents and build artifacts
+- **Environment introspection** - Query installed build tools and versions
 
-### 2. User creates a feature branch and pushes
+## Typical Workflow
 
-```bash
-# User's workspace
-git checkout -b feature/new-api
-# ... make changes ...
-git commit -m "Add new API endpoint"
-git push origin feature/new-api
-```
+### Branch Verification
+User pushes a branch and asks agent to verify it builds correctly:
 
-### 3. Agent checks out the branch on build service
+1. Agent lists repositories to confirm access
+2. Agent fetches latest changes from remote
+3. Agent checks out the user's branch
+4. Agent pulls to ensure fully up-to-date
+5. Agent runs clean build
+6. Agent executes tests
+7. Agent reports results with analysis
 
-Use the `git` tool to switch to the user's branch:
+### Build Debugging
+User reports a failing build and asks for diagnosis:
 
-```python
-# List available repositories
-repos = await call_tool("list", {})
+1. Agent checks out the failing branch
+2. Agent checks environment (compiler versions, tools)
+3. Agent runs build and captures output
+4. Agent reads relevant source files if needed
+5. Agent checks git log for recent changes
+6. Agent analyzes errors and suggests specific fixes
 
-# Check current branch
-status = await call_tool("git", {
-    "repo": "my-project",
-    "args": "branch --show-current"
-})
+### Branch Comparison
+User asks what changed between branches:
 
-# Fetch latest changes
-await call_tool("git", {
-    "repo": "my-project",
-    "args": "fetch origin"
-})
-
-# Checkout the feature branch
-await call_tool("git", {
-    "repo": "my-project",
-    "args": "checkout feature/new-api"
-})
-
-# Pull to ensure up-to-date
-await call_tool("git", {
-    "repo": "my-project",
-    "args": "pull origin feature/new-api"
-})
-```
-
-### 4. Agent runs builds and tests
-
-Execute the build process to verify the changes:
-
-```python
-# Clean previous builds
-await call_tool("make", {
-    "repo": "my-project",
-    "args": "clean"
-})
-
-# Build the project
-build_result = await call_tool("make", {
-    "repo": "my-project",
-    "args": "all"
-})
-
-# Run tests
-test_result = await call_tool("make", {
-    "repo": "my-project",
-    "args": "test"
-})
-```
-
-### 5. Agent inspects results and reports back
-
-Check build artifacts and provide feedback:
-
-```python
-# List build artifacts
-artifacts = await call_tool("ls", {
-    "repo": "my-project",
-    "args": "-lh build/"
-})
-
-# Read test output or logs if needed
-test_log = await call_tool("read_file", {
-    "repo": "my-project",
-    "path": "/absolute/path/to/my-project/test/results.log"
-})
-
-# Check git diff to understand changes
-diff = await call_tool("git", {
-    "repo": "my-project",
-    "args": "diff main..feature/new-api"
-})
-```
-
-Report findings to the user, including:
-- Build success/failure
-- Test results
-- Any warnings or errors
-- Build artifact details
-
-### 6. User iterates based on feedback
-
-If issues are found, the user fixes them in their workspace, commits, and pushes. Return to step 3.
+1. Agent fetches latest state for both branches
+2. Agent gets commit history between branches
+3. Agent gets diff summary statistics
+4. Agent provides full diff if needed
+5. Agent highlights significant changes
 
 ## Best Practices
 
-### Always check repository availability first
+### Branch Management
+- **Always fetch first** - Don't assume local state matches remote
+- **Explicit checkout** - Don't assume you're on the correct branch
+- **Pull after checkout** - Ensure fully synchronized with remote
 
-Before operating on a repository, verify it exists:
+### File Operations
+- **Use line ranges** - For large files, read specific sections (start_line, end_line)
+- **Absolute paths** - The read_file tool requires absolute paths within repository
+- **Read selectively** - Don't read entire codebases, target relevant files
 
-```python
-repos = await call_tool("list", {})
-if "my-project" not in [r["name"] for r in repos["repos"]]:
-    # Handle missing repo
-```
+### Build Analysis
+- **Check environment first** - When debugging failures, verify tool versions
+- **Parse output intelligently** - Look for exit codes, error patterns, warning counts
+- **Provide context** - Don't just report pass/fail, explain what errors mean
+- **Suggest specific fixes** - Based on build output and code inspection
 
-### Use explicit branch operations
+### Git Operations
+- **Use diff --stat** - Get summary before fetching full diffs
+- **Check log first** - Understand commit history before diving into changes
+- **Compare against base** - Use branch..branch syntax for comparisons
 
-Don't assume you're on the right branch. Always:
-1. Fetch to get latest remote state
-2. Checkout the specific branch
-3. Pull to ensure up-to-date
+## Important Constraints
 
-### Read files efficiently
+### Read-Only Access
+You **cannot** modify source files. Your role is to:
+- Run builds and tests
+- Read and analyze code
+- Suggest changes to the user
+- Provide debugging insights
 
-For large files, use line ranges:
+The user makes all source modifications in their development environment.
 
-```python
-# Read specific sections
-section = await call_tool("read_file", {
-    "repo": "my-project",
-    "path": "/absolute/path/to/large-file.cpp",
-    "start_line": 100,
-    "end_line": 200
-})
-```
+### Safe Git Commands Only
+Destructive git operations are blocked:
+- No `git reset --hard`
+- No `git push --force`
+- No `git clean -fd`
+- No rebase or history modification
 
-### Check environment before diagnosing build failures
+Only read operations and safe branch management are allowed.
 
-If builds fail, check what tools are available:
-
-```python
-env_info = await call_tool("env", {
-    "repo": "my-project"
-})
-```
-
-This shows compiler versions, make version, and other installed tools that may affect the build.
-
-### Parse build output carefully
-
-Build and test output appears in the tool results. Look for:
-- Exit codes (non-zero = failure)
-- Error messages (often in stderr)
-- Warning counts
-- Test statistics (passed/failed/skipped)
-
-### Handle large diffs intelligently
-
-When reviewing changes between branches, diffs can be large. Consider:
-- Using `git log` first to understand commit history
-- Checking `git diff --stat` for a summary before full diff
-- Reading specific files that changed rather than full diffs
-
-## Common Patterns
-
-### Verify a pushed branch
-
-```python
-# User: "I just pushed feature-xyz, can you verify it builds?"
-
-# 1. List repos to confirm access
-repos = await call_tool("list", {})
-
-# 2. Fetch latest
-await call_tool("git", {"repo": "project", "args": "fetch origin"})
-
-# 3. Checkout branch
-await call_tool("git", {"repo": "project", "args": "checkout feature-xyz"})
-
-# 4. Pull to ensure up-to-date
-await call_tool("git", {"repo": "project", "args": "pull"})
-
-# 5. Build
-result = await call_tool("make", {"repo": "project", "args": "all"})
-
-# 6. Test
-test_result = await call_tool("make", {"repo": "project", "args": "test"})
-
-# 7. Report findings
-```
-
-### Compare branches
-
-```python
-# User: "What changed between main and my feature branch?"
-
-# 1. Ensure both branches are up-to-date
-await call_tool("git", {"repo": "project", "args": "fetch origin"})
-
-# 2. Get commit history
-log = await call_tool("git", {
-    "repo": "project",
-    "args": "log --oneline main..feature-branch"
-})
-
-# 3. Get diff summary
-stat = await call_tool("git", {
-    "repo": "project",
-    "args": "diff --stat main..feature-branch"
-})
-
-# 4. Get full diff if needed
-diff = await call_tool("git", {
-    "repo": "project",
-    "args": "diff main..feature-branch"
-})
-```
-
-### Debug build failure
-
-```python
-# User: "The build is failing on my branch"
-
-# 1. Checkout the branch
-await call_tool("git", {"repo": "project", "args": "checkout failing-branch"})
-await call_tool("git", {"repo": "project", "args": "pull"})
-
-# 2. Check environment
-env = await call_tool("env", {"repo": "project"})
-
-# 3. Try building with verbose output
-result = await call_tool("make", {"repo": "project", "args": "clean all"})
-
-# 4. Read relevant source files if needed
-if "undefined reference" in result:
-    # Read the file mentioned in error
-    source = await call_tool("read_file", {
-        "repo": "project",
-        "path": "/absolute/path/to/problematic/file.cpp"
-    })
-
-# 5. Check git log for recent changes
-recent = await call_tool("git", {
-    "repo": "project",
-    "args": "log --oneline -10"
-})
-
-# 6. Provide analysis and suggestions
-```
-
-## What NOT to do
-
-**Don't try to modify source files** - You have read-only access. Suggest changes to the user instead.
-
-**Don't assume branch state** - Always explicitly checkout and pull the branch you want to test.
-
-**Don't run destructive commands** - The service blocks them, but don't attempt `git reset --hard`, `rm -rf`, etc.
-
-**Don't use relative paths for read_file** - Always use absolute paths within the repository.
-
-**Don't bypass the workflow** - The separation between development (user) and testing (agent) is intentional.
-
-## Tips for Effective Usage
-
-1. **Be proactive about branch management** - Fetch and pull frequently to stay synchronized
-2. **Read selectively** - Use line ranges for large files to reduce data transfer
-3. **Interpret build output** - Don't just report pass/fail, explain what the errors mean
-4. **Suggest specific fixes** - Based on build errors, provide actionable suggestions to the user
-5. **Track multiple repos** - If a project spans multiple repos, coordinate branch checkouts across them
-6. **Use git history** - Understanding recent commits helps diagnose issues
-
-## Security Notes
-
-- All git operations are restricted to safe commands (no force-push, reset --hard, etc.)
-- No arbitrary command execution is allowed
+### Path Requirements
+- File reads require absolute paths
+- Paths must be within configured repository directories
 - Path traversal attempts are blocked
-- You cannot write files or modify the repository
-- All operations are logged for audit purposes
 
-## Getting Help
+### Audit Trail
+All operations are logged for security and debugging purposes.
 
-If the MCP Build Service is not available or not responding:
-1. Ask the user to verify the service is running
-2. Check if the repository exists in the configured directory
-3. Confirm the MCP client configuration is correct
-4. Verify network connectivity for remote HTTP mode
+## Effective Usage Tips
 
-For detailed API specifications, use the MCP protocol's tool discovery mechanisms rather than relying solely on this document.
+1. **Be proactive about synchronization** - Fetch and pull frequently to stay current
+2. **Interpret, don't just report** - Explain what build errors mean and why they occurred
+3. **Read strategically** - Use line ranges and target specific files rather than bulk reading
+4. **Track repository state** - Know which branch you're on and when it was last updated
+5. **Consider multiple repositories** - Projects may span multiple repos; coordinate branch operations
+6. **Use git history** - Recent commits often explain current build state
+
+## What to Avoid
+
+- **Don't assume branch state** - Always explicitly checkout and pull
+- **Don't try to modify files** - Suggest changes to the user instead
+- **Don't use relative paths** - Always use absolute paths for file operations
+- **Don't ignore exit codes** - Non-zero exit codes indicate failures even if output looks normal
+- **Don't bypass the workflow** - The dev/test separation is intentional and valuable
+
+## MCP Protocol Compliance
+
+This service implements standard MCP protocol:
+- Tool discovery via `tools/list` provides complete schemas
+- All operations use standard MCP tool calling convention
+- Results follow MCP response format
+- Authentication via session key (if configured)
+
+Tool schemas, parameter types, and detailed specifications are available through MCP discovery mechanisms. This document focuses on conceptual usage patterns and workflow guidance.
+
+## Troubleshooting
+
+If the service is not responding:
+- Verify the service is running on the configured host/port
+- Check that repositories exist in the configured directory
+- Confirm MCP client configuration includes correct endpoint and session key
+- Verify network connectivity for remote HTTP/SSE mode
+
+For detailed operational status, check service logs on the host system.
