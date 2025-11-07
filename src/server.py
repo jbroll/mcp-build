@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import secrets
+import shlex
 import signal
 import socket
 import subprocess
@@ -353,7 +354,7 @@ class BuildEnvironmentServer:
         # Build command
         cmd = ["make"]
         if make_args:
-            cmd.extend(make_args.split())
+            cmd.extend(shlex.split(make_args))
 
         # Execute
         result = await self.run_command(cmd, cwd=repo_path)
@@ -374,7 +375,7 @@ class BuildEnvironmentServer:
         repo_path = self.get_repo_path(repo)
 
         # Build command
-        cmd = ["git"] + git_args.split()
+        cmd = ["git"] + shlex.split(git_args)
 
         # Execute
         result = await self.run_command(cmd, cwd=repo_path)
@@ -394,7 +395,7 @@ class BuildEnvironmentServer:
         # Build command
         cmd = ["ls"]
         if ls_args:
-            cmd.extend(ls_args.split())
+            cmd.extend(shlex.split(ls_args))
 
         # Execute
         result = await self.run_command(cmd, cwd=repo_path)
@@ -687,7 +688,7 @@ class BuildEnvironmentServer:
             # Build command
             cmd = ["ls"]
             if ls_request.args:
-                cmd.extend(ls_request.args.split())
+                cmd.extend(shlex.split(ls_request.args))
 
             # Execute
             result = await self.run_command(cmd, cwd=repo_path)
@@ -805,7 +806,7 @@ class BuildEnvironmentServer:
             repo_path = self.get_repo_path(repo)
 
             # Build command
-            cmd = ["git"] + git_args.split()
+            cmd = ["git"] + shlex.split(git_args)
 
             # Execute
             result = await self.run_command(cmd, cwd=repo_path)
@@ -834,7 +835,7 @@ class BuildEnvironmentServer:
             # Build command
             cmd = ["make"]
             if make_request.args:
-                cmd.extend(make_request.args.split())
+                cmd.extend(shlex.split(make_request.args))
 
             # Stream execution
             async def event_generator():
@@ -881,7 +882,7 @@ class BuildEnvironmentServer:
             repo_path = self.get_repo_path(repo)
 
             # Build command
-            cmd = ["git"] + git_args.split()
+            cmd = ["git"] + shlex.split(git_args)
 
             # Stream execution
             async def event_generator():

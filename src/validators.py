@@ -133,8 +133,8 @@ def validate_make_args(args: str) -> None:
         raise ValueError(f"Make arguments contain dangerous patterns: {args}")
 
     # Make arguments should be targets or variable assignments
-    # Allow: alphanumeric, underscore, hyphen, equals, space, slash (for paths)
-    if not re.match(r'^[a-zA-Z0-9_\-=\s/\.]+$', args):
+    # Allow: alphanumeric, underscore, hyphen, equals, space, slash (for paths), quotes (for values with spaces)
+    if not re.match(r'^[a-zA-Z0-9_\-=\s/\.\'"]+$', args):
         raise ValueError(f"Make arguments contain invalid characters: {args}")
 
 

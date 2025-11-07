@@ -94,6 +94,10 @@ class TestMakeValidation:
         validate_make_args("clean all")
         validate_make_args("VAR=value target")
         validate_make_args("CC=gcc BUILD=release")
+        # Note: Quoted arguments should also pass validation
+        # The actual splitting is handled by shlex.split() in server.py
+        validate_make_args('CFLAGS="-Wall -Werror" all')
+        validate_make_args('VAR="value with spaces" target')
 
     def test_reject_dangerous_patterns(self):
         """Test that dangerous patterns are rejected"""
