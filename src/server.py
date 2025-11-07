@@ -615,6 +615,12 @@ class BuildEnvironmentServer:
             init_options = self.server.create_initialization_options()
             await self.server.run(read_stream, write_stream, init_options)
 
+        # SSE connection has been handled through the transport's send callback
+        # We don't need to return a response as the ASGI protocol was handled directly
+        # However, to satisfy Starlette's routing, we should not return None
+        # The connection is already closed by the context manager above
+        return None
+
     # REST API Endpoints for Quick Operations
     async def api_list_repos(self, request: Request):
         """GET /api/repos - List all repositories"""
