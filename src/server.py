@@ -82,6 +82,13 @@ class GitStreamRequest(BaseModel):
     args: str = Field(default="", description="Additional arguments")
 
 
+class ReadFileRequest(BaseModel):
+    """Request model for read_file command"""
+    path: str = Field(..., description="Path to the file to read")
+    start_line: int | None = Field(default=None, description="Starting line number (1-indexed, optional)")
+    end_line: int | None = Field(default=None, description="Ending line number (1-indexed, optional)")
+
+
 class ApiResponse(BaseModel):
     """Standard API response model"""
     success: bool
@@ -615,6 +622,12 @@ class BuildEnvironmentServer:
             init_options = self.server.create_initialization_options()
             await self.server.run(read_stream, write_stream, init_options)
 
+        # SSE connection has been handled through the transport's send callback
+        # We don't need to return a response as the ASGI protocol was handled directly
+        # However, to satisfy Starlette's routing, we should not return None
+        # The connection is already closed by the context manager above
+        return None
+
     # REST API Endpoints for Quick Operations
     async def api_list_repos(self, request: Request):
         """GET /api/repos - List all repositories"""
@@ -681,6 +694,86 @@ class BuildEnvironmentServer:
             return JSONResponse({"success": True, "data": result})
         except Exception as e:
             logger.error(f"Error running ls: {e}", exc_info=True)
+            return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+    async def api_read_file(self, request: Request):
+        """POST /api/repos/{repo}/read_file - Read file contents"""
+        if not verify_session_key(request):
+            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+        try:
+            repo = request.path_params.get("repo")
+            body = await request.json()
+            read_file_request = ReadFileRequest(**body)
+
+            # Get repository path
+            repo_path = self.get_repo_path(repo)
+
+            # Validate and resolve the file path
+            validated_path = validate_file_path(read_file_request.path, repo_path)
+
+            # Read the file (reuse the logic from handle_read_file)
+            with open(validated_path, 'r', encoding='utf-8', errors='replace') as f:
+                if read_file_request.start_line is not None or read_file_request.end_line is not None:
+                    # Read specific line range
+                    lines = f.readlines()
+                    total_lines = len(lines)
+
+                    # Validate line numbers
+                    if read_file_request.start_line is not None and read_file_request.start_line < 1:
+                        raise ValueError(f"start_line must be >= 1, got {read_file_request.start_line}")
+                    if read_file_request.end_line is not None and read_file_request.end_line < 1:
+                        raise ValueError(f"end_line must be >= 1, got {read_file_request.end_line}")
+                    if (read_file_request.start_line is not None and
+                        read_file_request.end_line is not None and
+                        read_file_request.start_line > read_file_request.end_line):
+                        raise ValueError(
+                            f"start_line ({read_file_request.start_line}) must be <= "
+                            f"end_line ({read_file_request.end_line})"
+                        )
+
+                    # Default values
+                    start_idx = (read_file_request.start_line - 1) if read_file_request.start_line is not None else 0
+                    end_idx = read_file_request.end_line if read_file_request.end_line is not None else total_lines
+
+                    # Clamp to valid range
+                    start_idx = max(0, min(start_idx, total_lines))
+                    end_idx = max(0, min(end_idx, total_lines))
+
+                    # Extract the requested lines
+                    selected_lines = lines[start_idx:end_idx]
+
+                    # Format output with line numbers
+                    output = f"File: {validated_path}\n"
+                    output += f"Lines {start_idx + 1}-{end_idx} of {total_lines}\n"
+                    output += "=" * 80 + "\n"
+                    for i, line in enumerate(selected_lines, start=start_idx + 1):
+                        output += f"{i:6d}: {line.rstrip()}\n"
+
+                    return JSONResponse({"success": True, "data": output})
+                else:
+                    # Read entire file
+                    content = f.read()
+                    lines_count = content.count('\n') + (1 if content and not content.endswith('\n') else 0)
+
+                    output = f"File: {validated_path}\n"
+                    output += f"Total lines: {lines_count}\n"
+                    output += "=" * 80 + "\n"
+
+                    # Add line numbers to entire file
+                    for i, line in enumerate(content.splitlines(), start=1):
+                        output += f"{i:6d}: {line}\n"
+
+                    return JSONResponse({"success": True, "data": output})
+
+        except FileNotFoundError as e:
+            logger.error(f"File not found: {e}", exc_info=True)
+            return JSONResponse({"success": False, "error": str(e)}, status_code=404)
+        except ValueError as e:
+            logger.error(f"Validation error: {e}", exc_info=True)
+            return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+        except Exception as e:
+            logger.error(f"Error reading file: {e}", exc_info=True)
             return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
     async def api_git_quick(self, request: Request):
@@ -849,6 +942,7 @@ class BuildEnvironmentServer:
             Route("/api/repos", endpoint=self.api_list_repos, methods=["GET"]),
             Route("/api/repos/{repo}/env", endpoint=self.api_get_env, methods=["GET"]),
             Route("/api/repos/{repo}/ls", endpoint=self.api_ls, methods=["POST"]),
+            Route("/api/repos/{repo}/read_file", endpoint=self.api_read_file, methods=["POST"]),
             Route("/api/repos/{repo}/git/quick", endpoint=self.api_git_quick, methods=["POST"]),
 
             # Streaming SSE endpoints for long operations
@@ -886,6 +980,7 @@ class BuildEnvironmentServer:
         logger.info(f"    GET  /api/repos - List repositories")
         logger.info(f"    GET  /api/repos/{{repo}}/env - Get environment info")
         logger.info(f"    POST /api/repos/{{repo}}/ls - List directory contents")
+        logger.info(f"    POST /api/repos/{{repo}}/read_file - Read file contents")
         logger.info(f"    POST /api/repos/{{repo}}/git/quick - Quick git operations (status, branch, log)")
         logger.info(f"")
         logger.info(f"  Streaming API (Long Operations):")
