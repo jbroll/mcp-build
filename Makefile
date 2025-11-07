@@ -15,6 +15,9 @@ build:
 	# Copy source files (Python modules and scripts)
 	cp -r src/* build/lib/
 
+	# Copy documentation
+	cp MCP-BUILD.md build/lib/
+
 	# Ensure env_info.sh is executable
 	if [ -f build/lib/env_info.sh ]; then \
 		chmod +x build/lib/env_info.sh; \

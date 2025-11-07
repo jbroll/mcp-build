@@ -910,7 +910,7 @@ class BuildEnvironmentServer:
         """GET /mcp-build.md - Serve the MCP-BUILD.md documentation"""
         # Documentation endpoint is public - no authentication required
         try:
-            doc_path = Path(__file__).parent.parent / "MCP-BUILD.md"
+            doc_path = Path(__file__).parent / "MCP-BUILD.md"
             if not doc_path.exists():
                 return PlainTextResponse(
                     "Documentation not found. Please see README.md in the mcp-build repository.",

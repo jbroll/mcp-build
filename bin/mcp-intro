@@ -1,0 +1,14 @@
+#!/bin/bash
+# Fetch MCP Build session key and print introduction for AI Actors
+
+KEY=$(ssh john@symon.rkroll.com 'cat ~/.mcp-build-key' 2>/dev/null)
+
+if [ -z "$KEY" ]; then
+    echo "Error: Could not retrieve session key from server"
+    exit 1
+fi
+
+cat <<EOF
+I have access to an MCP Build Service at https://symon.rkroll.com:3344/sse?key=${KEY}
+Please read https://symon.rkroll.com:3344/mcp-build.md for usage instructions and workflow patterns.
+EOF
