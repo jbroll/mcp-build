@@ -24,6 +24,7 @@ import subprocess
 import sys
 import urllib.request
 from pathlib import Path
+from collections import defaultdict
 from typing import Any, Dict, List
 
 from mcp.server import Server
@@ -64,23 +65,27 @@ SESSION_KEY = None
 class LsRequest(BaseModel):
     """Request model for ls command"""
     args: str = Field(default="", description="Arguments for ls command")
+    branch: str | None = Field(default=None, description="Git branch name (optional)")
 
 
 class GitQuickRequest(BaseModel):
     """Request model for quick git operations"""
     operation: str = Field(..., description="Git operation (status, branch, log)")
     args: str = Field(default="", description="Additional arguments")
+    branch: str | None = Field(default=None, description="Git branch name (optional)")
 
 
 class MakeStreamRequest(BaseModel):
     """Request model for streaming make operations"""
     args: str = Field(default="", description="Make target and arguments")
+    branch: str | None = Field(default=None, description="Git branch name (optional)")
 
 
 class GitStreamRequest(BaseModel):
     """Request model for streaming git operations"""
     operation: str = Field(..., description="Git operation (pull, fetch, diff, show, checkout)")
     args: str = Field(default="", description="Additional arguments")
+    branch: str | None = Field(default=None, description="Git branch name (optional)")
 
 
 class ReadFileRequest(BaseModel):
@@ -88,6 +93,7 @@ class ReadFileRequest(BaseModel):
     path: str = Field(..., description="Path to the file to read")
     start_line: int | None = Field(default=None, description="Starting line number (1-indexed, optional)")
     end_line: int | None = Field(default=None, description="Ending line number (1-indexed, optional)")
+    branch: str | None = Field(default=None, description="Git branch name (optional)")
 
 
 class ApiResponse(BaseModel):
@@ -148,6 +154,7 @@ class BuildEnvironmentServer:
         self.server = Server("mcp-build")
         self.repos: Dict[str, Dict[str, str]] = {}
         self.current_repo: str | None = None
+        self.worktree_locks: Dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
         # Register handlers using decorators
         self._register_handlers()
@@ -171,8 +178,9 @@ class BuildEnvironmentServer:
 
         try:
             # Scan the base directory for subdirectories containing .git
+            # Skip hidden directories (which include our managed worktrees)
             for item in REPOS_BASE_DIR.iterdir():
-                if item.is_dir():
+                if item.is_dir() and not item.name.startswith('.'):
                     git_dir = item / ".git"
                     if git_dir.exists():
                         # This is a git repository
@@ -195,6 +203,112 @@ class BuildEnvironmentServer:
             raise ValueError(f"Unknown repository: {repo_name}")
         return Path(self.repos[repo_name]["path"])
 
+    def _validate_branch_name(self, branch: str) -> None:
+        """Validate branch name to prevent path traversal"""
+        if not branch:
+            raise ValueError("Branch name cannot be empty")
+        if '..' in branch:
+            raise ValueError("Branch name cannot contain '..'")
+        if branch.startswith('/'):
+            raise ValueError("Branch name cannot be absolute path")
+        if '\0' in branch:
+            raise ValueError("Branch name cannot contain null bytes")
+
+    async def _ensure_worktree(self, repo_name: str, branch: str, base_path: Path) -> Path:
+        """Ensure worktree exists for given repo and branch"""
+        # Sanitize branch name for filesystem
+        safe_branch = branch.replace('/', '-').replace('\\', '-')
+        worktree_name = f".{repo_name}@{safe_branch}"
+        worktree_path = base_path.parent / worktree_name
+
+        lock_key = f"{repo_name}/{branch}"
+        async with self.worktree_locks[lock_key]:
+            if not worktree_path.exists():
+                logger.info(f"Creating worktree for {repo_name}:{branch} at {worktree_path}")
+
+                # First fetch to ensure branch exists
+                try:
+                    await self._run_git_simple(["git", "fetch", "origin"], cwd=base_path)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch before creating worktree: {e}")
+
+                # Create worktree (path relative to base for git worktree add)
+                rel_path = os.path.relpath(worktree_path, base_path)
+                try:
+                    await self._run_git_simple(
+                        ["git", "worktree", "add", rel_path, f"origin/{branch}"],
+                        cwd=base_path
+                    )
+                except Exception as e:
+                    raise RuntimeError(f"Failed to create worktree for {branch}: {e}")
+            else:
+                # Worktree exists, fetch and pull to update
+                logger.info(f"Updating worktree for {repo_name}:{branch}")
+                try:
+                    await self._run_git_simple(["git", "fetch", "origin"], cwd=worktree_path)
+                    # Try to pull, but don't fail if it has local changes
+                    try:
+                        await self._run_git_simple(["git", "pull", "origin", branch], cwd=worktree_path)
+                    except Exception as e:
+                        logger.warning(
+                            f"WARNING: Failed to pull {branch} in worktree. "
+                            f"You may have uncommitted changes or build products. "
+                            f"Error: {e}\n"
+                            f"Continuing with existing state. Use 'git' tool to inspect or reset manually."
+                        )
+                except Exception as e:
+                    logger.warning(f"Failed to update worktree {worktree_path}: {e}")
+
+        return worktree_path
+
+    async def _run_git_simple(self, cmd: List[str], cwd: Path) -> None:
+        """Run a git command without capturing output (for setup operations)"""
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            error_msg = stderr.decode('utf-8', errors='replace').strip()
+            raise RuntimeError(f"Command failed: {' '.join(cmd)}\n{error_msg}")
+
+    async def get_working_path(self, repo_name: str, branch: str | None) -> Path:
+        """Get working directory for repo and branch
+
+        If branch is specified, ALWAYS uses a worktree for isolation.
+        If branch is None, uses base repo (backward compatible).
+        """
+        base_path = self.get_repo_path(repo_name)
+
+        # If no branch specified, use base repo
+        if not branch:
+            return base_path
+
+        # Validate branch name
+        self._validate_branch_name(branch)
+
+        # Always use worktree when branch is specified for consistency and isolation
+        return await self._ensure_worktree(repo_name, branch, base_path)
+
+    def _get_lock_key(self, repo_name: str, branch: str | None) -> str:
+        """Get lock key for repo@branch"""
+        if branch:
+            return f"{repo_name}@{branch}"
+        return repo_name
+
+    async def execute_in_worktree(self, repo_name: str, branch: str | None, cmd: List[str]) -> str:
+        """Execute command in repo worktree with exclusive lock for repo@branch"""
+        lock_key = self._get_lock_key(repo_name, branch)
+
+        async with self.worktree_locks[lock_key]:
+            # Get working path (may create/update worktree)
+            work_path = await self.get_working_path(repo_name, branch)
+
+            # Execute command
+            return await self.run_command(cmd, cwd=work_path)
+
     async def get_tools_list(self) -> List[Tool]:
         """List available MCP tools"""
         return [
@@ -210,7 +324,8 @@ class BuildEnvironmentServer:
             Tool(
                 name="make",
                 description="Run make command with specified arguments. "
-                           "Executes make in the root of the specified repository.",
+                           "Executes make in the root of the specified repository. "
+                           "If branch is specified, creates/uses a hidden worktree (.repo@branch) for isolation.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -221,6 +336,10 @@ class BuildEnvironmentServer:
                         "repo": {
                             "type": "string",
                             "description": "Repository name (required)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Git branch name (optional). If provided, uses isolated worktree."
                         }
                     },
                     "required": ["repo"]
@@ -229,7 +348,8 @@ class BuildEnvironmentServer:
             Tool(
                 name="git",
                 description="Run git commands in a repository. "
-                           "Limited to safe operations: status, log, checkout, pull, branch, diff, fetch, reset, show",
+                           "Limited to safe operations: status, log, checkout, pull, branch, diff, fetch, reset, show. "
+                           "If branch is specified, creates/uses a hidden worktree (.repo@branch) for isolation.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -240,6 +360,10 @@ class BuildEnvironmentServer:
                         "repo": {
                             "type": "string",
                             "description": "Repository name (required)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Git branch name (optional). If provided, uses isolated worktree."
                         }
                     },
                     "required": ["args", "repo"]
@@ -248,7 +372,8 @@ class BuildEnvironmentServer:
             Tool(
                 name="ls",
                 description="List files and directories in a repository. "
-                           "Limited to paths within the repository to prevent path traversal.",
+                           "Limited to paths within the repository to prevent path traversal. "
+                           "If branch is specified, creates/uses a hidden worktree (.repo@branch) for isolation.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -259,6 +384,10 @@ class BuildEnvironmentServer:
                         "repo": {
                             "type": "string",
                             "description": "Repository name (required)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Git branch name (optional). If provided, uses isolated worktree."
                         }
                     },
                     "required": ["repo"]
@@ -267,13 +396,18 @@ class BuildEnvironmentServer:
             Tool(
                 name="env",
                 description="Show environment information including environment variables "
-                           "and versions of key build tools (gcc, g++, python, make, cmake, etc.)",
+                           "and versions of key build tools (gcc, g++, python, make, cmake, etc.). "
+                           "If branch is specified, creates/uses a hidden worktree (.repo@branch) for isolation.",
                 inputSchema={
                     "type": "object",
                     "properties": {
                         "repo": {
                             "type": "string",
                             "description": "Repository name (required)"
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Git branch name (optional). If provided, uses isolated worktree."
                         }
                     },
                     "required": ["repo"]
@@ -282,7 +416,8 @@ class BuildEnvironmentServer:
             Tool(
                 name="read_file",
                 description="Read the contents of a file in a repository. "
-                           "Supports reading specific line ranges for large files.",
+                           "Supports reading specific line ranges for large files. "
+                           "If branch is specified, creates/uses a hidden worktree (.repo@branch) for isolation.",
                 inputSchema={
                     "type": "object",
                     "properties": {
@@ -301,6 +436,10 @@ class BuildEnvironmentServer:
                         "end_line": {
                             "type": "integer",
                             "description": "Ending line number (1-indexed, optional). If provided, only lines from start_line to end_line will be returned."
+                        },
+                        "branch": {
+                            "type": "string",
+                            "description": "Git branch name (optional). If provided, uses isolated worktree."
                         }
                     },
                     "required": ["repo", "path"]
@@ -345,26 +484,25 @@ class BuildEnvironmentServer:
     async def handle_make(self, args: Dict[str, Any]) -> List[TextContent]:
         """Handle make command"""
         repo = args.get("repo")
+        branch = args.get("branch")
         make_args = args.get("args", "")
 
         # Validate arguments
         validate_make_args(make_args)
-
-        # Get repository path
-        repo_path = self.get_repo_path(repo)
 
         # Build command
         cmd = ["make"]
         if make_args:
             cmd.extend(shlex.split(make_args))
 
-        # Execute
-        result = await self.run_command(cmd, cwd=repo_path)
+        # Execute in appropriate worktree with locking
+        result = await self.execute_in_worktree(repo, branch, cmd)
         return [TextContent(type="text", text=result)]
 
     async def handle_git(self, args: Dict[str, Any]) -> List[TextContent]:
         """Handle git command"""
         repo = args.get("repo")
+        branch = args.get("branch")
         git_args = args.get("args", "")
 
         if not git_args:
@@ -373,51 +511,48 @@ class BuildEnvironmentServer:
         # Validate arguments
         validate_git_args(git_args)
 
-        # Get repository path
-        repo_path = self.get_repo_path(repo)
-
         # Build command
         cmd = ["git"] + shlex.split(git_args)
 
-        # Execute
-        result = await self.run_command(cmd, cwd=repo_path)
+        # Execute in appropriate worktree with locking
+        result = await self.execute_in_worktree(repo, branch, cmd)
         return [TextContent(type="text", text=result)]
 
     async def handle_ls(self, args: Dict[str, Any]) -> List[TextContent]:
         """Handle ls command"""
         repo = args.get("repo")
+        branch = args.get("branch")
         ls_args = args.get("args", "")
 
         # Validate arguments
         validate_ls_args(ls_args)
-
-        # Get repository path
-        repo_path = self.get_repo_path(repo)
 
         # Build command
         cmd = ["ls"]
         if ls_args:
             cmd.extend(shlex.split(ls_args))
 
-        # Execute
-        result = await self.run_command(cmd, cwd=repo_path)
+        # Execute in appropriate worktree with locking
+        result = await self.execute_in_worktree(repo, branch, cmd)
         return [TextContent(type="text", text=result)]
 
     async def handle_env(self, args: Dict[str, Any]) -> List[TextContent]:
         """Handle env command"""
         repo = args.get("repo")
-        repo_path = self.get_repo_path(repo)
+        branch = args.get("branch")
 
         # Execute env info script
         if not ENV_INFO_SCRIPT.exists():
             raise FileNotFoundError(f"Environment info script not found: {ENV_INFO_SCRIPT}")
 
-        result = await self.run_command([str(ENV_INFO_SCRIPT)], cwd=repo_path)
+        # Execute in appropriate worktree with locking
+        result = await self.execute_in_worktree(repo, branch, [str(ENV_INFO_SCRIPT)])
         return [TextContent(type="text", text=result)]
 
     async def handle_read_file(self, args: Dict[str, Any]) -> List[TextContent]:
         """Handle read_file command"""
         repo = args.get("repo")
+        branch = args.get("branch")
         file_path = args.get("path")
         start_line = args.get("start_line")
         end_line = args.get("end_line")
@@ -425,11 +560,13 @@ class BuildEnvironmentServer:
         if not file_path:
             raise ValueError("File path is required")
 
-        # Get repository path
-        repo_path = self.get_repo_path(repo)
+        # Get working path with locking
+        lock_key = self._get_lock_key(repo, branch)
+        async with self.worktree_locks[lock_key]:
+            repo_path = await self.get_working_path(repo, branch)
 
-        # Validate and resolve the file path
-        validated_path = validate_file_path(file_path, repo_path)
+            # Validate and resolve the file path
+            validated_path = validate_file_path(file_path, repo_path)
 
         # Read the file
         try:
@@ -660,12 +797,14 @@ class BuildEnvironmentServer:
 
         try:
             repo = request.path_params.get("repo")
-            repo_path = self.get_repo_path(repo)
+            # For GET endpoint, branch can be passed as query param
+            branch = request.query_params.get("branch")
 
             if not ENV_INFO_SCRIPT.exists():
                 raise FileNotFoundError(f"Environment info script not found: {ENV_INFO_SCRIPT}")
 
-            result = await self.run_command([str(ENV_INFO_SCRIPT)], cwd=repo_path)
+            # Execute in appropriate worktree with locking
+            result = await self.execute_in_worktree(repo, branch, [str(ENV_INFO_SCRIPT)])
             return JSONResponse({"success": True, "data": result})
         except Exception as e:
             logger.error(f"Error getting env: {e}", exc_info=True)
@@ -684,16 +823,13 @@ class BuildEnvironmentServer:
             # Validate arguments
             validate_ls_args(ls_request.args)
 
-            # Get repository path
-            repo_path = self.get_repo_path(repo)
-
             # Build command
             cmd = ["ls"]
             if ls_request.args:
                 cmd.extend(shlex.split(ls_request.args))
 
-            # Execute
-            result = await self.run_command(cmd, cwd=repo_path)
+            # Execute in appropriate worktree with locking
+            result = await self.execute_in_worktree(repo, ls_request.branch, cmd)
             return JSONResponse({"success": True, "data": result})
         except Exception as e:
             logger.error(f"Error running ls: {e}", exc_info=True)
@@ -709,11 +845,13 @@ class BuildEnvironmentServer:
             body = await request.json()
             read_file_request = ReadFileRequest(**body)
 
-            # Get repository path
-            repo_path = self.get_repo_path(repo)
+            # Get working path with locking
+            lock_key = self._get_lock_key(repo, read_file_request.branch)
+            async with self.worktree_locks[lock_key]:
+                repo_path = await self.get_working_path(repo, read_file_request.branch)
 
-            # Validate and resolve the file path
-            validated_path = validate_file_path(read_file_request.path, repo_path)
+                # Validate and resolve the file path
+                validated_path = validate_file_path(read_file_request.path, repo_path)
 
             # Read the file (reuse the logic from handle_read_file)
             with open(validated_path, 'r', encoding='utf-8', errors='replace') as f:
@@ -804,14 +942,11 @@ class BuildEnvironmentServer:
             # Validate arguments
             validate_git_args(git_args)
 
-            # Get repository path
-            repo_path = self.get_repo_path(repo)
-
             # Build command
             cmd = ["git"] + shlex.split(git_args)
 
-            # Execute
-            result = await self.run_command(cmd, cwd=repo_path)
+            # Execute in appropriate worktree with locking
+            result = await self.execute_in_worktree(repo, git_request.branch, cmd)
             return JSONResponse({"success": True, "data": result})
         except Exception as e:
             logger.error(f"Error running git: {e}", exc_info=True)
@@ -831,20 +966,24 @@ class BuildEnvironmentServer:
             # Validate arguments
             validate_make_args(make_request.args)
 
-            # Get repository path
-            repo_path = self.get_repo_path(repo)
-
             # Build command
             cmd = ["make"]
             if make_request.args:
                 cmd.extend(shlex.split(make_request.args))
 
-            # Stream execution
+            # Stream execution with locking
+            lock_key = self._get_lock_key(repo, make_request.branch)
+
             async def event_generator():
                 """Generate SSE events from command output"""
                 try:
-                    async for chunk in self.run_command_streaming(cmd, cwd=repo_path):
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                    async with self.worktree_locks[lock_key]:
+                        # Get working path (may create/update worktree)
+                        repo_path = await self.get_working_path(repo, make_request.branch)
+
+                        # Stream command output
+                        async for chunk in self.run_command_streaming(cmd, cwd=repo_path):
+                            yield f"data: {json.dumps(chunk)}\n\n"
                 except Exception as e:
                     logger.error(f"Error in stream: {e}", exc_info=True)
                     yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
@@ -880,18 +1019,22 @@ class BuildEnvironmentServer:
             # Validate arguments
             validate_git_args(git_args)
 
-            # Get repository path
-            repo_path = self.get_repo_path(repo)
-
             # Build command
             cmd = ["git"] + shlex.split(git_args)
 
-            # Stream execution
+            # Stream execution with locking
+            lock_key = self._get_lock_key(repo, git_request.branch)
+
             async def event_generator():
                 """Generate SSE events from command output"""
                 try:
-                    async for chunk in self.run_command_streaming(cmd, cwd=repo_path):
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                    async with self.worktree_locks[lock_key]:
+                        # Get working path (may create/update worktree)
+                        repo_path = await self.get_working_path(repo, git_request.branch)
+
+                        # Stream command output
+                        async for chunk in self.run_command_streaming(cmd, cwd=repo_path):
+                            yield f"data: {json.dumps(chunk)}\n\n"
                 except Exception as e:
                     logger.error(f"Error in stream: {e}", exc_info=True)
                     yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
