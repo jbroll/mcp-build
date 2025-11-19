@@ -214,22 +214,6 @@ class BuildEnvironmentServer:
         if '\0' in branch:
             raise ValueError("Branch name cannot contain null bytes")
 
-    async def _get_current_branch(self, repo_path: Path) -> str | None:
-        """Get current branch name, returns None on error"""
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "git", "rev-parse", "--abbrev-ref", "HEAD",
-                cwd=str(repo_path),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            stdout, stderr = await process.communicate()
-            if process.returncode == 0:
-                return stdout.decode('utf-8').strip()
-        except Exception as e:
-            logger.warning(f"Failed to get current branch for {repo_path}: {e}")
-        return None
-
     async def _ensure_worktree(self, repo_name: str, branch: str, base_path: Path) -> Path:
         """Ensure worktree exists for given repo and branch"""
         # Sanitize branch name for filesystem
@@ -293,8 +277,8 @@ class BuildEnvironmentServer:
     async def get_working_path(self, repo_name: str, branch: str | None) -> Path:
         """Get working directory for repo and branch
 
-        Note: This does NOT acquire locks. Callers should use get_working_path_locked
-        for command execution to ensure only one request per repo@branch at a time.
+        If branch is specified, ALWAYS uses a worktree for isolation.
+        If branch is None, uses base repo (backward compatible).
         """
         base_path = self.get_repo_path(repo_name)
 
@@ -305,13 +289,7 @@ class BuildEnvironmentServer:
         # Validate branch name
         self._validate_branch_name(branch)
 
-        # Check if base repo is already on the requested branch
-        current_branch = await self._get_current_branch(base_path)
-        if current_branch == branch:
-            logger.info(f"Using base repo {repo_name} (already on {branch})")
-            return base_path
-
-        # Create or use worktree
+        # Always use worktree when branch is specified for consistency and isolation
         return await self._ensure_worktree(repo_name, branch, base_path)
 
     def _get_lock_key(self, repo_name: str, branch: str | None) -> str:
